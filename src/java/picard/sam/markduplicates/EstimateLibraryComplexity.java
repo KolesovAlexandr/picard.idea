@@ -59,6 +59,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import static java.lang.Math.pow;
 
@@ -281,6 +283,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
 
         // Loop through the input files and pick out the read sequences etc.
         final ProgressLogger progress = new ProgressLogger(log, (int) 1e6, "Read");
+        final ExecutorService service = Executors.newCachedThreadPool();
         for (final File f : INPUT) {
             final Map<String, PairedReadSequence> pendingByName = new HashMap<String, PairedReadSequence>();
             final SamReader in = SamReaderFactory.makeDefault().referenceSequence(REFERENCE_SEQUENCE).open(f);
