@@ -142,25 +142,45 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
         byte[] read2;
         short libraryId;
 
-        public short getReadGroup() { return this.readGroup; }
+        public short getReadGroup() {
+            return this.readGroup;
+        }
 
-        public void setReadGroup(final short readGroup) { this.readGroup = readGroup; }
+        public void setReadGroup(final short readGroup) {
+            this.readGroup = readGroup;
+        }
 
-        public short getTile() { return this.tile; }
+        public short getTile() {
+            return this.tile;
+        }
 
-        public void setTile(final short tile) { this.tile = tile; }
+        public void setTile(final short tile) {
+            this.tile = tile;
+        }
 
-        public short getX() { return this.x; }
+        public short getX() {
+            return this.x;
+        }
 
-        public void setX(final short x) { this.x = x; }
+        public void setX(final short x) {
+            this.x = x;
+        }
 
-        public short getY() { return this.y; }
+        public short getY() {
+            return this.y;
+        }
 
-        public void setY(final short y) { this.y = y; }
+        public void setY(final short y) {
+            this.y = y;
+        }
 
-        public short getLibraryId() { return this.libraryId; }
+        public short getLibraryId() {
+            return this.libraryId;
+        }
 
-        public void setLibraryId(final short libraryId) { this.libraryId = libraryId; }
+        public void setLibraryId(final short libraryId) {
+            this.libraryId = libraryId;
+        }
     }
 
     /**
@@ -225,7 +245,9 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
         }
 
         @Override
-        public SortingCollection.Codec<PairedReadSequence> clone() { return new PairedReadCodec(); }
+        public SortingCollection.Codec<PairedReadSequence> clone() {
+            return new PairedReadCodec();
+        }
     }
 
     /**
@@ -251,7 +273,9 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
         }
     }
 
-    /** Stock main method. */
+    /**
+     * Stock main method.
+     */
     public static void main(final String[] args) {
         new EstimateLibraryComplexity().instanceMainWithExit(args);
     }
@@ -284,8 +308,9 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
         final ProgressLogger progress = new ProgressLogger(log, (int) 1e6, "Read");
         final ExecutorService service = Executors.newCachedThreadPool();
         final BlockingQueue<List<SAMRecord>> queue = new LinkedBlockingDeque<>(QUEUE_CAPACITY);
+        final Map<String, PairedReadSequence> pendingByName = new HashMap<String, PairedReadSequence>();
         final Semaphore sem = new Semaphore(6);
-        List<SAMRecord> recs= new ArrayList<SAMRecord>(MAX_RECS);
+        List<SAMRecord> recs = new ArrayList<SAMRecord>(MAX_RECS);
         service.execute(new Runnable() {
             @Override
             public void run() {
@@ -299,43 +324,50 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                         service.submit(new Runnable() {
                             @Override
                             public void run() {
-                                final Map<String, PairedReadSequence> pendingByName = new HashMap<String, PairedReadSequence>();
-                                for (SAMRecord rec : tmpRec)
-                                {
-                                    PairedReadSequence prs = pendingByName.remove(rec.getReadName());
-                                    if (prs == null) {
-                                        // Make a new paired read object and add RG and physical location information to it
-                                        prs = new PairedReadSequence();
-                                        if (opticalDuplicateFinder.addLocationInformation(rec.getReadName(), prs)) {
-                                            final SAMReadGroupRecord rg = rec.getReadGroup();
-                                            if (rg != null) prs.setReadGroup((short) readGroups.indexOf(rg));
+
+                                for (SAMRecord rec : tmpRec) {
+                                    PairedReadSequence prs;
+                                    synchronized (pendingByName) {
+                                        prs = pendingByName.remove(rec.getReadName());
+
+                                        if (prs == null) {
+                                            // Make a new paired read object and add RG and physical location information to it
+                                            prs = new PairedReadSequence();
+                                            if (opticalDuplicateFinder.addLocationInformation(rec.getReadName(), prs)) {
+                                                final SAMReadGroupRecord rg = rec.getReadGroup();
+                                                if (rg != null) prs.setReadGroup((short) readGroups.indexOf(rg));
+                                            }
+
+                                            pendingByName.put(rec.getReadName(), prs);
                                         }
 
-                                        pendingByName.put(rec.getReadName(), prs);
+
+                                        // Read passes quality check if both ends meet the mean quality criteria
+                                        final boolean passesQualityCheck = passesQualityCheck(rec.getReadBases(),
+                                                rec.getBaseQualities(),
+                                                MIN_IDENTICAL_BASES,
+                                                MIN_MEAN_QUALITY);
+                                        prs.qualityOk = prs.qualityOk && passesQualityCheck;
+
+                                        // Get the bases and restore them to their original orientation if necessary
+                                        final byte[] bases = rec.getReadBases();
+                                        if (rec.getReadNegativeStrandFlag()) SequenceUtil.reverseComplement(bases);
+
+                                        if (rec.getFirstOfPairFlag()) {
+                                            prs.read1 = bases;
+                                        } else {
+                                            prs.read2 = bases;
+                                        }
+
+                                        if (prs.read1 != null && prs.read2 != null && prs.qualityOk) {
+                                            sorter.add(prs);
+                                        }
                                     }
 
-                                    // Read passes quality check if both ends meet the mean quality criteria
-                                    final boolean passesQualityCheck = passesQualityCheck(rec.getReadBases(),
-                                            rec.getBaseQualities(),
-                                            MIN_IDENTICAL_BASES,
-                                            MIN_MEAN_QUALITY);
-                                    prs.qualityOk = prs.qualityOk && passesQualityCheck;
 
-                                    // Get the bases and restore them to their original orientation if necessary
-                                    final byte[] bases = rec.getReadBases();
-                                    if (rec.getReadNegativeStrandFlag()) SequenceUtil.reverseComplement(bases);
+                                        progress.record(rec);
 
-                                    if (rec.getFirstOfPairFlag()) {
-                                        prs.read1 = bases;
-                                    } else {
-                                        prs.read2 = bases;
-                                    }
 
-                                    if (prs.read1 != null && prs.read2 != null && prs.qualityOk) {
-                                        sorter.add(prs);
-                                    }
-
-                                    progress.record(rec);
                                 }
 
                                 sem.release();
@@ -373,9 +405,14 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                 recs = new ArrayList<>(MAX_RECS);
 
             }
+
             CloserUtil.close(in);
+            service.shutdown();
             try {
+                queue.put(recs);
                 queue.put(poisonPill);
+//                service.shutdown();
+//                service.awaitTermination(1, TimeUnit.DAYS);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
