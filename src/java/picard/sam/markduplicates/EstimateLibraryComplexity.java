@@ -38,6 +38,8 @@ import htsjdk.samtools.util.ProgressLogger;
 import htsjdk.samtools.util.SequenceUtil;
 import htsjdk.samtools.util.SortingCollection;
 import htsjdk.samtools.util.StringUtil;
+import org.omg.CORBA.*;
+import org.omg.CORBA.Object;
 import picard.PicardException;
 import picard.cmdline.CommandLineProgramProperties;
 import picard.cmdline.Option;
@@ -100,7 +102,11 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
 
     private static final int MAX_RECS = 1000;
     final static List<SAMRecord> poisonPill = Collections.emptyList();
+    final static List<String> poisonPillLog = Collections.emptyList();
     private static final int QUEUE_CAPACITY = 2;
+    public static final int MAX_SEM_QUE = 6;
+    private static final int QUEUE_LOGS_CAPACITY = 2;
+    private static final int MAX_LOGS = 1000;
     @Option(shortName = StandardOptionDefinitions.INPUT_SHORT_NAME, doc = "One or more files to combine and " +
             "estimate library complexity from. Reads can be mapped or unmapped.")
     public List<File> INPUT;
@@ -308,9 +314,11 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
         final ProgressLogger progress = new ProgressLogger(log, (int) 1e6, "Read");
         final ExecutorService service = Executors.newCachedThreadPool();
         final BlockingQueue<List<SAMRecord>> queue = new LinkedBlockingDeque<>(QUEUE_CAPACITY);
+        final BlockingQueue<List<String>> logQueue = new LinkedBlockingDeque<>(QUEUE_LOGS_CAPACITY);
         final Map<String, PairedReadSequence> pendingByName = new HashMap<String, PairedReadSequence>();
-        final Semaphore sem = new Semaphore(6);
+        final Semaphore sem = new Semaphore(MAX_SEM_QUE);
         List<SAMRecord> recs = new ArrayList<SAMRecord>(MAX_RECS);
+        List<String> logs = new ArrayList<String>(MAX_LOGS);
         service.execute(new Runnable() {
             @Override
             public void run() {
@@ -407,7 +415,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
             }
 
             CloserUtil.close(in);
-            service.shutdown();
+//            service.shutdown();
             try {
                 queue.put(recs);
                 queue.put(poisonPill);
@@ -429,6 +437,34 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
         int groupsProcessed = 0;
         long lastLogTime = System.currentTimeMillis();
         final int meanGroupSize = Math.max(1, (recordsRead / 2) / (int) pow(4, MIN_IDENTICAL_BASES * 2));
+        service.execute(new Runnable() {
+            @Override
+            public void run() {
+                while (true) {
+                    try {
+                        final List<String> tmpLog = logQueue.take();
+                        if (tmpLog.isEmpty()) {
+                            return;
+                        }
+                        sem.acquire();
+                        service.submit(new Runnable() {
+                            @Override
+                            public void run() {
+                                for (String tLog : tmpLog) {
+                                    log.warn(tLog);
+                                }
+                                sem.release();
+                            }
+
+                        });
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+
+
+                }
+            }
+        });
 
         while (iterator.hasNext()) {
             // Get the next group and split it apart by library
@@ -436,11 +472,18 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
 
             if (group.size() > meanGroupSize * MAX_GROUP_RATIO) {
                 final PairedReadSequence prs = group.get(0);
-                log.warn("Omitting group with over " + MAX_GROUP_RATIO + " times the expected mean number of read pairs. " +
+//                TODO
+                /* log.warn("Omitting group with over " + MAX_GROUP_RATIO + " times the expected mean number of read pairs. " +
+                        "Mean=" + meanGroupSize + ", Actual=" + group.size() + ". Prefixes: " +
+                        StringUtil.bytesToString(prs.read1, 0, MIN_IDENTICAL_BASES) +
+                        " / " +
+                        StringUtil.bytesToString(prs.read1, 0, MIN_IDENTICAL_BASES));*/
+                logs.add("Omitting group with over " + MAX_GROUP_RATIO + " times the expected mean number of read pairs. " +
                         "Mean=" + meanGroupSize + ", Actual=" + group.size() + ". Prefixes: " +
                         StringUtil.bytesToString(prs.read1, 0, MIN_IDENTICAL_BASES) +
                         " / " +
                         StringUtil.bytesToString(prs.read1, 0, MIN_IDENTICAL_BASES));
+
             } else {
                 final Map<String, List<PairedReadSequence>> sequencesByLibrary = splitByLibrary(group, readGroups);
 
@@ -495,6 +538,22 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                     lastLogTime = System.currentTimeMillis();
                 }
             }
+            if (logs.size()<MAX_LOGS){
+                continue;
+            }
+            try {
+                logQueue.put(logs);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            logs = new ArrayList<>(MAX_LOGS);
+        }
+
+        try {
+            logQueue.put(logs);
+            logQueue.put(poisonPillLog);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
 
         iterator.close();
