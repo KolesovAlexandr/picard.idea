@@ -103,10 +103,13 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
     private static final int MAX_RECS = 1000;
     final static List<SAMRecord> poisonPill = Collections.emptyList();
     final static List<String> poisonPillLog = Collections.emptyList();
+    final static  List<Map<String, List<PairedReadSequence>>> poisonPillTmp = Collections.emptyList();
     private static final int QUEUE_CAPACITY = 2;
     public static final int MAX_SEM_QUE = 6;
     private static final int QUEUE_LOGS_CAPACITY = 2;
-    private static final int MAX_LOGS = 1000;
+    private static final int MAX_LOGS = 80;
+    private static final int MAX_TMP = 100;
+    private static final int QUEUE_TMP_CAPACITY = 2;
     @Option(shortName = StandardOptionDefinitions.INPUT_SHORT_NAME, doc = "One or more files to combine and " +
             "estimate library complexity from. Reads can be mapped or unmapped.")
     public List<File> INPUT;
@@ -315,10 +318,12 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
         final ExecutorService service = Executors.newCachedThreadPool();
         final BlockingQueue<List<SAMRecord>> queue = new LinkedBlockingDeque<>(QUEUE_CAPACITY);
         final BlockingQueue<List<String>> logQueue = new LinkedBlockingDeque<>(QUEUE_LOGS_CAPACITY);
+        final BlockingQueue<List<Map<String, List<PairedReadSequence>>>> tmpQueue = new LinkedBlockingDeque<>(QUEUE_TMP_CAPACITY);
         final Map<String, PairedReadSequence> pendingByName = new HashMap<String, PairedReadSequence>();
         final Semaphore sem = new Semaphore(MAX_SEM_QUE);
         List<SAMRecord> recs = new ArrayList<SAMRecord>(MAX_RECS);
         List<String> logs = new ArrayList<String>(MAX_LOGS);
+        List<Map<String, List<PairedReadSequence>>> tmp = new ArrayList<Map<String, List<PairedReadSequence>>>(MAX_TMP);
         service.execute(new Runnable() {
             @Override
             public void run() {
@@ -466,6 +471,86 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
             }
         });
 
+        service.execute(new Runnable() {
+            @Override
+            public void run() {
+                while (true) {
+                    try {
+                        final List<Map<String, List<PairedReadSequence>>> tmps =  tmpQueue.take();
+                        if (tmps.isEmpty()) {
+                            return;
+                        }
+                        sem.acquire();
+                        service.submit(new Runnable() {
+                            @Override
+                            public void run() {
+                                for(Map<String, List<PairedReadSequence>> tm:tmps) {
+                                    for (final Map.Entry<String, List<PairedReadSequence>> entry : tm.entrySet()) {
+                                        final String library = entry.getKey();
+                                        final List<PairedReadSequence> seqs = entry.getValue();
+
+
+
+                                        Histogram<Integer> duplicationHisto;
+                                        Histogram<Integer> opticalHisto;
+                                        synchronized (duplicationHistosByLibrary) {
+                                            synchronized (opticalHistosByLibrary) {
+                                                duplicationHisto = duplicationHistosByLibrary.get(library);
+                                                opticalHisto = opticalHistosByLibrary.get(library);
+                                                if (duplicationHisto == null) {
+                                                    duplicationHisto = new Histogram<Integer>("duplication_group_count", library);
+                                                    opticalHisto = new Histogram<Integer>("duplication_group_count", "optical_duplicates");
+                                                    duplicationHistosByLibrary.put(library, duplicationHisto);
+                                                    opticalHistosByLibrary.put(library, opticalHisto);
+                                                }
+                                            }
+                                        }
+
+                                        // Figure out if any reads within this group are duplicates of one another
+                                        for (int i = 0; i < seqs.size(); ++i) {
+                                            final PairedReadSequence lhs = seqs.get(i);
+                                            if (lhs == null) continue;
+                                            final List<PairedReadSequence> dupes = new ArrayList<PairedReadSequence>();
+
+                                            for (int j = i + 1; j < seqs.size(); ++j) {
+                                                final PairedReadSequence rhs = seqs.get(j);
+                                                if (rhs == null) continue;
+
+                                                if (matches(lhs, rhs, MAX_DIFF_RATE)) {
+                                                    dupes.add(rhs);
+                                                    seqs.set(j, null);
+                                                }
+                                            }
+
+                                            if (dupes.size() > 0) {
+                                                dupes.add(lhs);
+                                                final int duplicateCount = dupes.size();
+                                                duplicationHisto.increment(duplicateCount);
+
+                                                final boolean[] flags = opticalDuplicateFinder.findOpticalDuplicates(dupes);
+                                                for (final boolean b : flags) {
+                                                    if (b) opticalHisto.increment(duplicateCount);
+                                                }
+                                            } else {
+                                                duplicationHisto.increment(1);
+                                            }
+                                        }
+                                    }
+                                }
+                                sem.release();
+
+                            }
+                        });
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+
+
+
+                }
+            }
+        });
+
         while (iterator.hasNext()) {
             // Get the next group and split it apart by library
             final List<PairedReadSequence> group = getNextGroup(iterator);
@@ -483,75 +568,48 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                         StringUtil.bytesToString(prs.read1, 0, MIN_IDENTICAL_BASES) +
                         " / " +
                         StringUtil.bytesToString(prs.read1, 0, MIN_IDENTICAL_BASES));
+                if (logs.size()<MAX_LOGS){
+                    continue;
+                }
+                try {
+                    logQueue.put(logs);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                logs = new ArrayList<>(MAX_LOGS);
 
             } else {
                 final Map<String, List<PairedReadSequence>> sequencesByLibrary = splitByLibrary(group, readGroups);
 
+                tmp.add(sequencesByLibrary);
+
+
+
                 // Now process the reads by library
-                for (final Map.Entry<String, List<PairedReadSequence>> entry : sequencesByLibrary.entrySet()) {
-                    final String library = entry.getKey();
-                    final List<PairedReadSequence> seqs = entry.getValue();
-
-                    Histogram<Integer> duplicationHisto = duplicationHistosByLibrary.get(library);
-                    Histogram<Integer> opticalHisto = opticalHistosByLibrary.get(library);
-                    if (duplicationHisto == null) {
-                        duplicationHisto = new Histogram<Integer>("duplication_group_count", library);
-                        opticalHisto = new Histogram<Integer>("duplication_group_count", "optical_duplicates");
-                        duplicationHistosByLibrary.put(library, duplicationHisto);
-                        opticalHistosByLibrary.put(library, opticalHisto);
-                    }
-
-                    // Figure out if any reads within this group are duplicates of one another
-                    for (int i = 0; i < seqs.size(); ++i) {
-                        final PairedReadSequence lhs = seqs.get(i);
-                        if (lhs == null) continue;
-                        final List<PairedReadSequence> dupes = new ArrayList<PairedReadSequence>();
-
-                        for (int j = i + 1; j < seqs.size(); ++j) {
-                            final PairedReadSequence rhs = seqs.get(j);
-                            if (rhs == null) continue;
-
-                            if (matches(lhs, rhs, MAX_DIFF_RATE)) {
-                                dupes.add(rhs);
-                                seqs.set(j, null);
-                            }
-                        }
-
-                        if (dupes.size() > 0) {
-                            dupes.add(lhs);
-                            final int duplicateCount = dupes.size();
-                            duplicationHisto.increment(duplicateCount);
-
-                            final boolean[] flags = opticalDuplicateFinder.findOpticalDuplicates(dupes);
-                            for (final boolean b : flags) {
-                                if (b) opticalHisto.increment(duplicateCount);
-                            }
-                        } else {
-                            duplicationHisto.increment(1);
-                        }
-                    }
-                }
-
                 ++groupsProcessed;
                 if (lastLogTime < System.currentTimeMillis() - 60000) {
                     log.info("Processed " + groupsProcessed + " groups.");
                     lastLogTime = System.currentTimeMillis();
                 }
+                if (tmp.size()<MAX_TMP)
+                {
+                    continue;
+                }
+                try {
+                    tmpQueue.put(tmp);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                tmp = new ArrayList<>(MAX_TMP);
             }
-            if (logs.size()<MAX_LOGS){
-                continue;
-            }
-            try {
-                logQueue.put(logs);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-            logs = new ArrayList<>(MAX_LOGS);
+
         }
 
         try {
             logQueue.put(logs);
+            tmpQueue.put(tmp);
             logQueue.put(poisonPillLog);
+            tmpQueue.put(poisonPillTmp);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
@@ -561,8 +619,17 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
 
         final MetricsFile<DuplicationMetrics, Integer> file = getMetricsFile();
         for (final String library : duplicationHistosByLibrary.keySet()) {
-            final Histogram<Integer> duplicationHisto = duplicationHistosByLibrary.get(library);
-            final Histogram<Integer> opticalHisto = opticalHistosByLibrary.get(library);
+            final Histogram<Integer> duplicationHisto;
+
+            final Histogram<Integer> opticalHisto;
+            synchronized (duplicationHistosByLibrary) {
+                synchronized (opticalHistosByLibrary) {
+                    duplicationHisto = duplicationHistosByLibrary.get(library);
+                    opticalHisto = opticalHistosByLibrary.get(library);
+                }
+            }
+
+
             final DuplicationMetrics metrics = new DuplicationMetrics();
             metrics.LIBRARY = library;
 
@@ -583,6 +650,21 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
             file.addHistogram(duplicationHisto);
 
         }
+
+        try {
+            service.shutdown();
+            service.awaitTermination(1,TimeUnit.DAYS);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+      /*  while (!service.isTerminated())
+        {
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }*/
 
         file.write(OUTPUT);
 
