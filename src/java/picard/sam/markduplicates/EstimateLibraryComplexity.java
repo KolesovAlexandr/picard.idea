@@ -106,7 +106,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
     private static final int QUEUE_CAPACITY = 2;
     public static final int MAX_SEM_QUE = 6;
     private static final int QUEUE_LOGS_CAPACITY = 2;
-    private static final int MAX_LOGS = 1000;
+    private static final int MAX_LOGS = 80;
     @Option(shortName = StandardOptionDefinitions.INPUT_SHORT_NAME, doc = "One or more files to combine and " +
             "estimate library complexity from. Reads can be mapped or unmapped.")
     public List<File> INPUT;
@@ -315,7 +315,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
         final ExecutorService service = Executors.newCachedThreadPool();
         final BlockingQueue<List<SAMRecord>> queue = new LinkedBlockingDeque<>(QUEUE_CAPACITY);
         final BlockingQueue<List<String>> logQueue = new LinkedBlockingDeque<>(QUEUE_LOGS_CAPACITY);
-        final Map<String, PairedReadSequence> pendingByName = new HashMap<String, PairedReadSequence>();
+        final Map<String, PairedReadSequence> pendingByName = new  ConcurrentHashMap<String, PairedReadSequence>();
         final Semaphore sem = new Semaphore(MAX_SEM_QUE);
         List<SAMRecord> recs = new ArrayList<SAMRecord>(MAX_RECS);
         List<String> logs = new ArrayList<String>(MAX_LOGS);
@@ -335,7 +335,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
 
                                 for (SAMRecord rec : tmpRec) {
                                     PairedReadSequence prs;
-                                    synchronized (pendingByName) {
+//                                    synchronized (pendingByName) {
                                         prs = pendingByName.remove(rec.getReadName());
 
                                         if (prs == null) {
@@ -370,7 +370,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                                         if (prs.read1 != null && prs.read2 != null && prs.qualityOk) {
                                             sorter.add(prs);
                                         }
-                                    }
+//                                    }
 
 
                                         progress.record(rec);
