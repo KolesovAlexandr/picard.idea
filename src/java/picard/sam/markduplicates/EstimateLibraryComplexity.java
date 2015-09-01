@@ -315,7 +315,8 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
         final ExecutorService service = Executors.newCachedThreadPool();
         final BlockingQueue<List<SAMRecord>> queue = new LinkedBlockingDeque<>(QUEUE_CAPACITY);
         final BlockingQueue<List<String>> logQueue = new LinkedBlockingDeque<>(QUEUE_LOGS_CAPACITY);
-        final Map<String, PairedReadSequence> pendingByName = new HashMap<String, PairedReadSequence>();
+        final Map<String, PairedReadSequence> pendingByName = new ConcurrentHashMap<String, PairedReadSequence>();
+
         final Semaphore sem = new Semaphore(MAX_SEM_QUE);
         List<SAMRecord> recs = new ArrayList<SAMRecord>(MAX_RECS);
         List<String> logs = new ArrayList<String>(MAX_LOGS);
@@ -334,9 +335,9 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                             public void run() {
 
                                 for (SAMRecord rec : tmpRec) {
-                                    PairedReadSequence prs;
-                                    synchronized (pendingByName) {
-                                        prs = pendingByName.remove(rec.getReadName());
+
+//                                    synchronized (pendingByName) {
+                                    PairedReadSequence prs = pendingByName.remove(rec.getReadName());
 
                                         if (prs == null) {
                                             // Make a new paired read object and add RG and physical location information to it
@@ -368,9 +369,13 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                                         }
 
                                         if (prs.read1 != null && prs.read2 != null && prs.qualityOk) {
-                                            sorter.add(prs);
+                                            synchronized (sorter) {
+                                                sorter.add(prs);
+                                            }
+
+
                                         }
-                                    }
+//                                    }
 
 
                                         progress.record(rec);
@@ -556,6 +561,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
             e.printStackTrace();
         }
 
+//        final Object ss = sorter.tmp.get();
         iterator.close();
         sorter.cleanup();
 
