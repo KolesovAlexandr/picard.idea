@@ -38,8 +38,6 @@ import htsjdk.samtools.util.ProgressLogger;
 import htsjdk.samtools.util.SequenceUtil;
 import htsjdk.samtools.util.SortingCollection;
 import htsjdk.samtools.util.StringUtil;
-import org.omg.CORBA.*;
-import org.omg.CORBA.Object;
 import picard.PicardException;
 import picard.cmdline.CommandLineProgramProperties;
 import picard.cmdline.Option;
@@ -56,8 +54,19 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 import static java.lang.Math.pow;
 
@@ -108,7 +117,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
     public static final int MAX_SEM_QUE = 6;
     private static final int QUEUE_LOGS_CAPACITY = 2;
     private static final int MAX_LOGS = 1000;
-    private static final int MAX_GROUPS = 1000 ;
+    private static final int MAX_GROUPS = 500 ;
     private static final int QUEUE_GROUP_CAPACITY =2;
     @Option(shortName = StandardOptionDefinitions.INPUT_SHORT_NAME, doc = "One or more files to combine and " +
             "estimate library complexity from. Reads can be mapped or unmapped.")
@@ -290,7 +299,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
     }
 
     public EstimateLibraryComplexity() {
-        MAX_RECORDS_IN_RAM = (int) (Runtime.getRuntime().maxMemory() / PairedReadSequence.size_in_bytes) / 2;
+        MAX_RECORDS_IN_RAM = (int) (Runtime.getRuntime().maxMemory() / PairedReadSequence.size_in_bytes) / 4;
     }
 
     /**
@@ -527,13 +536,12 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
             @Override
             public void run() {
                 while (true) {
-
                     try {
                         final List<List<PairedReadSequence>> tmpGrp = groupQueue.take();
-                        sem.acquire();
                         if (tmpGrp.isEmpty()){
                             return;
                         }
+                        sem.acquire();
                         groupService.submit(new Runnable() {
                             @Override
                             public void run() {
@@ -589,6 +597,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
 
 
                                 }
+                                sem.release();
 
                             }
                         });
