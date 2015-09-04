@@ -39,8 +39,12 @@ import picard.cmdline.programgroups.Metrics;
 import picard.util.IlluminaUtil;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A command line tool to read a BAM file and produce standard alignment metrics that would be applicable to any alignment.  
@@ -81,6 +85,7 @@ public class CollectAlignmentSummaryMetrics extends SinglePassSamProgram {
             "<hr />";
     
     private static final Log log = Log.getInstance(CollectAlignmentSummaryMetrics.class);
+    private static final int MAX_SIZE =  1000;
 
     // Usage and parameters
 
@@ -108,6 +113,8 @@ public class CollectAlignmentSummaryMetrics extends SinglePassSamProgram {
     public File REFERENCE_SEQUENCE = Defaults.REFERENCE_FASTA;
 
     private AlignmentSummaryMetricsCollector collector;
+    private List<Object[]> recRef = new ArrayList<Object[]>(MAX_SIZE);
+    private ExecutorService service = Executors.newCachedThreadPool();
 
     /** Required main method implementation. */
     public static void main(final String[] argv) {
@@ -131,10 +138,52 @@ public class CollectAlignmentSummaryMetrics extends SinglePassSamProgram {
     }
 
     @Override protected void acceptRead(final SAMRecord rec, final ReferenceSequence ref) {
-        collector.acceptRecord(rec, ref);
+
+        recRef.add(new Object[]{rec, ref});
+        if (recRef.size()<MAX_SIZE){
+            return;
+        }
+        threadRecRef();
+
+//        collector.acceptRecord(rec, ref);
+
+    }
+
+    private void threadRecRef() {
+        final List <Object[]> tmpRecRef = recRef;
+        recRef = new ArrayList<Object[]>(MAX_SIZE);
+        service.execute(new Runnable() {
+            @Override
+            public void run() {
+                for(Object[] rr:tmpRecRef){
+                    collector.acceptRecord((SAMRecord) rr[0],(ReferenceSequence) rr[1]);
+                }
+            }
+        });
+
+
+
     }
 
     @Override protected void finish() {
+        threadRecRef();
+
+
+        service.shutdown();
+        try {
+            service.awaitTermination(1, TimeUnit.DAYS);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        while (!service.isTerminated()){
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
         collector.finish();
 
         final MetricsFile<AlignmentSummaryMetrics, Comparable<?>> file = getMetricsFile();
