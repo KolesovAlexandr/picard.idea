@@ -103,6 +103,7 @@ public abstract class SinglePassSamProgram extends CommandLineProgram {
         final ProgressLogger progress = new ProgressLogger(log);
 
         for (final SAMRecord rec : in) {
+//            int i=0;
             final ReferenceSequence ref;
             if (walker == null || rec.getReferenceIndex() == SAMRecord.NO_ALIGNMENT_REFERENCE_INDEX) {
                 ref = null;
@@ -111,8 +112,10 @@ public abstract class SinglePassSamProgram extends CommandLineProgram {
             }
 
             for (final SinglePassSamProgram program : programs) {
+//                i++;
                 program.acceptRead(rec, ref);
             }
+//            System.out.println(i);
 
             progress.record(rec);
 
