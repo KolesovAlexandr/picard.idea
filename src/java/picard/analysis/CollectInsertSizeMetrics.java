@@ -39,7 +39,12 @@ import picard.cmdline.programgroups.Metrics;
 import picard.util.RExecutor;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Command line program to read non-duplicate insert sizes, create a Histogram
@@ -57,6 +62,7 @@ import java.util.Set;
 public class CollectInsertSizeMetrics extends SinglePassSamProgram {
     private static final Log log = Log.getInstance(CollectInsertSizeMetrics.class);
     private static final String Histogram_R_SCRIPT = "picard/analysis/insertSizeHistogram.R";
+    private static final int MAX_SIZE = 1000 ;
 
     @Option(shortName="H", doc="File to write insert size Histogram chart to.")
     public File Histogram_FILE;
@@ -79,6 +85,8 @@ public class CollectInsertSizeMetrics extends SinglePassSamProgram {
 
     // Calculates InsertSizeMetrics for all METRIC_ACCUMULATION_LEVELs provided
     private InsertSizeMetricsCollector multiCollector;
+    protected List<Object[]> recref = new ArrayList<>(MAX_SIZE);
+    private ExecutorService service = Executors.newCachedThreadPool();
 //    private ExecutorService service = Executors.newCachedThreadPool();
 
     /** Required main method implementation. */
@@ -115,11 +123,49 @@ public class CollectInsertSizeMetrics extends SinglePassSamProgram {
 
     @Override protected void acceptRead(final SAMRecord record, final ReferenceSequence ref) {
 
+        recref.add(new Object[]{record, ref});
+        if (recref.size()< MAX_SIZE){
+            return;
+        }
+        threadRecRef();
 
-          multiCollector.acceptRecord(record, ref);
+         // multiCollector.acceptRecord(record, ref);
+
+
+
+    }
+
+    private void threadRecRef() {
+        final List<Object[]> tmpRecRef = recref;
+        recref = new ArrayList<>(MAX_SIZE);
+        service.execute(new Runnable() {
+            @Override
+            public void run() {
+
+                for(Object[] rr : tmpRecRef){
+                    multiCollector.acceptRecord((SAMRecord)rr[0],(ReferenceSequence)rr[1]);
+                }
+
+            }
+        });
     }
 
     @Override protected void finish() {
+        threadRecRef();
+        while (!service.isTerminated()){
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        service.shutdown();
+        try {
+            service.awaitTermination(1, TimeUnit.DAYS);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
 
 
         multiCollector.finish();
