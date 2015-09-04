@@ -37,6 +37,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * MultiLevelCollector handles accumulating Metrics at different MetricAccumulationLevels(ALL_READS, SAMPLE, LIBRARY, READ_GROUP).
@@ -73,6 +75,7 @@ public abstract class MultiLevelCollector<METRIC_TYPE extends MetricBase, Histog
     //A list of Distributor that is at most length 3, 1 for each (SAMPLE, LIBRARY, READ_GROUP) accumulation levels
     //these will be listed in the order in which their children would be added to a metric file
     private List<Distributor> outputOrderedDistributors;
+    private ExecutorService service = Executors.newCachedThreadPool();
 
     //Convert the current SAMRecord and the ReferenceSequence for that record into an ARGTYPE object
     //see accept record for use
@@ -309,17 +312,43 @@ public abstract class MultiLevelCollector<METRIC_TYPE extends MetricBase, Histog
      * this value to all collectors that should include this record
      */
     public void acceptRecord(final SAMRecord record, final ReferenceSequence refSeq) {
-        final ARGTYPE arg = makeArg(record, refSeq);
 
+      /*  service.execute(new Runnable() {
+            @Override
+            public void run() {
+                final ARGTYPE arg = makeArg(record, refSeq);
+
+                for(final Distributor collector : outputOrderedDistributors) {
+                    collector.acceptRecord(arg, record.getReadGroup());
+                }
+            }
+        });*/
+        final ARGTYPE arg = makeArg(record, refSeq);
         for(final Distributor collector : outputOrderedDistributors) {
             collector.acceptRecord(arg, record.getReadGroup());
         }
+
     }
 
     /**
      * Call finish on all PerUnitMetricCollectors
      */
     public void finish() {
+       /* while(!service.isTerminated()){
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+*/
+        /*service.shutdown();
+
+        try {
+            service.awaitTermination(1, TimeUnit.DAYS);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }*/
         for(final Distributor collector : outputOrderedDistributors) {
             collector.finish();
         }

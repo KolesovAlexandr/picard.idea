@@ -79,6 +79,7 @@ public class CollectInsertSizeMetrics extends SinglePassSamProgram {
 
     // Calculates InsertSizeMetrics for all METRIC_ACCUMULATION_LEVELs provided
     private InsertSizeMetricsCollector multiCollector;
+//    private ExecutorService service = Executors.newCachedThreadPool();
 
     /** Required main method implementation. */
     public static void main(final String[] argv) {
@@ -113,10 +114,14 @@ public class CollectInsertSizeMetrics extends SinglePassSamProgram {
     }
 
     @Override protected void acceptRead(final SAMRecord record, final ReferenceSequence ref) {
-        multiCollector.acceptRecord(record, ref);
+
+
+          multiCollector.acceptRecord(record, ref);
     }
 
     @Override protected void finish() {
+
+
         multiCollector.finish();
 
         final MetricsFile<InsertSizeMetrics, Integer> file = getMetricsFile();
