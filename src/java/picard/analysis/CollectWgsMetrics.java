@@ -34,6 +34,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicLongArray;
 
 /**
  * Computes a number of metrics that are useful for evaluating coverage and performance of whole genome sequencing experiments.
@@ -179,16 +180,16 @@ public class CollectWgsMetrics extends CommandLineProgram {
 
         final int max = COVERAGE_CAP;
 
-        final AtomicLong[] histogramArray = new AtomicLong[max + 1];
-        for (int i = 0; i < histogramArray.length; i++) {
+        final AtomicLongArray histogramArray = new AtomicLongArray(max + 1);
+       /* for (int i = 0; i < histogramArray.length; i++) {
             histogramArray[i] = new AtomicLong(0);
-        }
+        }*/
 
 
-        final AtomicLong[] baseQHistogramArray = new AtomicLong[Byte.MAX_VALUE];
-        for (int i = 0; i < baseQHistogramArray.length; i++) {
-            baseQHistogramArray[i] = new AtomicLong(0);
-        }
+        final AtomicLongArray baseQHistogramArray = new AtomicLongArray(Byte.MAX_VALUE);
+      /*  for (int i = 0; i < baseQHistogramArray.length(); i++) {
+            baseQHistogramArray.get(i) = new AtomicLong(0);
+        }*/
 
 
         final boolean usingStopAfter = STOP_AFTER > 0;
@@ -235,14 +236,14 @@ public class CollectWgsMetrics extends CommandLineProgram {
                                         }
                                         pileupSize++;
                                         if (pileupSize <= max) {
-                                            baseQHistogramArray[recs.getRecord().getBaseQualities()[recs.getOffset()]].incrementAndGet();
+                                            baseQHistogramArray.incrementAndGet(recs.getRecord().getBaseQualities()[recs.getOffset()]);
                                         }
                                     }
 
 
                                     final int depth = Math.min(readNames.size(), max);
                                     if (depth < readNames.size()) basesExcludedByCapping.addAndGet(readNames.size() - max);
-                                    histogramArray[depth].incrementAndGet();
+                                    histogramArray.incrementAndGet(depth);
                                     //                                HistogramArray[depth].incrementAndGet();
 
                                 }
@@ -323,17 +324,17 @@ public class CollectWgsMetrics extends CommandLineProgram {
 
         // Construct and write the outputs
         final Histogram<Integer> histo = new Histogram<Integer>("coverage", "count");
-        long[] histogramArrayNoAtomic = new long[histogramArray.length];
-        for (int i = 0; i < histogramArray.length; ++i) {
-            histogramArrayNoAtomic[i] = histogramArray[i].get();
-            histo.increment(i, histogramArray[i].get());
+        long[] histogramArrayNoAtomic = new long[histogramArray.length()];
+        for (int i = 0; i < histogramArray.length(); ++i) {
+            histogramArrayNoAtomic[i] = histogramArray.get(i);
+            histo.increment(i, histogramArray.get(i));
         }
 
 
         // Construct and write the outputs
         final Histogram<Integer> baseQHisto = new Histogram<Integer>("value", "baseq_count");
-        for (int i = 0; i < baseQHistogramArray.length; ++i) {
-            baseQHisto.increment(i, baseQHistogramArray[i].get());
+        for (int i = 0; i < baseQHistogramArray.length(); ++i) {
+            baseQHisto.increment(i, baseQHistogramArray.get(i));
         }
 
 
@@ -358,19 +359,19 @@ public class CollectWgsMetrics extends CommandLineProgram {
         metrics.PCT_EXC_CAPPED = basesExcludedByCapping.get() / totalWithExcludes;
         metrics.PCT_EXC_TOTAL = (totalWithExcludes - total) / totalWithExcludes;
 
-        metrics.PCT_5X = MathUtil.sum(histogramArrayNoAtomic, 5, histogramArray.length) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_10X = MathUtil.sum(histogramArrayNoAtomic, 10, histogramArray.length) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_15X = MathUtil.sum(histogramArrayNoAtomic, 15, histogramArray.length) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_20X = MathUtil.sum(histogramArrayNoAtomic, 20, histogramArray.length) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_25X = MathUtil.sum(histogramArrayNoAtomic, 25, histogramArray.length) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_30X = MathUtil.sum(histogramArrayNoAtomic, 30, histogramArray.length) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_40X = MathUtil.sum(histogramArrayNoAtomic, 40, histogramArray.length) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_50X = MathUtil.sum(histogramArrayNoAtomic, 50, histogramArray.length) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_60X = MathUtil.sum(histogramArrayNoAtomic, 60, histogramArray.length) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_70X = MathUtil.sum(histogramArrayNoAtomic, 70, histogramArray.length) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_80X = MathUtil.sum(histogramArrayNoAtomic, 80, histogramArray.length) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_90X = MathUtil.sum(histogramArrayNoAtomic, 90, histogramArray.length) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_100X = MathUtil.sum(histogramArrayNoAtomic, 100, histogramArray.length) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_5X = MathUtil.sum(histogramArrayNoAtomic, 5, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_10X = MathUtil.sum(histogramArrayNoAtomic, 10, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_15X = MathUtil.sum(histogramArrayNoAtomic, 15, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_20X = MathUtil.sum(histogramArrayNoAtomic, 20, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_25X = MathUtil.sum(histogramArrayNoAtomic, 25, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_30X = MathUtil.sum(histogramArrayNoAtomic, 30, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_40X = MathUtil.sum(histogramArrayNoAtomic, 40, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_50X = MathUtil.sum(histogramArrayNoAtomic, 50, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_60X = MathUtil.sum(histogramArrayNoAtomic, 60, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_70X = MathUtil.sum(histogramArrayNoAtomic, 70, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_80X = MathUtil.sum(histogramArrayNoAtomic, 80, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_90X = MathUtil.sum(histogramArrayNoAtomic, 90, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_100X = MathUtil.sum(histogramArrayNoAtomic, 100, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
 
         final MetricsFile<WgsMetrics, Integer> out = getMetricsFile();
         out.addMetric(metrics);
