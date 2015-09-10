@@ -28,10 +28,9 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
@@ -160,8 +159,11 @@ public class CollectWgsMetrics extends CommandLineProgram {
         final CountingFilter mapqFilter = new CountingMapQFilter(MINIMUM_MAPPING_QUALITY);
         final CountingPairedFilter pairFilter = new CountingPairedFilter();
 
-        final ExecutorService service = Executors.newFixedThreadPool(MAX_THREADS);
+//        final ExecutorService service = Executors.newFixedThreadPool(MAX_THREADS);
+
         final BlockingQueue<List<SamLocusIterator.LocusInfo>> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
+        final ThreadPoolExecutor service = new ThreadPoolExecutor(MAX_THREADS,MAX_THREADS,0L,TimeUnit.SECONDS,
+                new LinkedBlockingQueue<Runnable>());
         final Semaphore sem = new Semaphore(MAX_SEM_QUE);
 
 
