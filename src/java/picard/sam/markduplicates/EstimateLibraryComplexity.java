@@ -109,16 +109,17 @@ import static java.lang.Math.pow;
 )
 public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCommandLineProgram {
 
-    private static final int MAX_RECS = 1000;
+    private static final int MAX_RECS = 5000;
     final static List<SAMRecord> poisonPill = Collections.emptyList();
     final static List<String> poisonPillLog = Collections.emptyList();
-    final static  List<List<PairedReadSequence>>  poisonPillGroups = Collections.emptyList();
+    final static List<List<PairedReadSequence>> poisonPillGroups = Collections.emptyList();
     private static final int QUEUE_CAPACITY = 2;
     public static final int MAX_SEM_QUE = 6;
     private static final int QUEUE_LOGS_CAPACITY = 2;
-    private static final int MAX_LOGS = 1000;
-    private static final int MAX_GROUPS = 500 ;
-    private static final int QUEUE_GROUP_CAPACITY =2;
+    private static final int MAX_LOGS = 500;
+    private static final int MAX_GROUPS = 5000;
+    private static final int QUEUE_GROUP_CAPACITY = 2;
+    private static final int MAX_THREADS = Runtime.getRuntime().availableProcessors() / 2;
     @Option(shortName = StandardOptionDefinitions.INPUT_SHORT_NAME, doc = "One or more files to combine and " +
             "estimate library complexity from. Reads can be mapped or unmapped.")
     public List<File> INPUT;
@@ -287,7 +288,8 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                 if (retval != 0) return retval;
             }
 
-            return System.identityHashCode(lhs) - System.identityHashCode(rhs);
+//            return System.identityHashCode(lhs) - System.identityHashCode(rhs);
+            return 0;
         }
     }
 
@@ -324,7 +326,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
 
         // Loop through the input files and pick out the read sequences etc.
         final ProgressLogger progress = new ProgressLogger(log, (int) 1e6, "Read");
-        final ExecutorService recService = Executors.newCachedThreadPool();
+        final ExecutorService recService = Executors.newFixedThreadPool(MAX_THREADS);
         final BlockingQueue<List<SAMRecord>> queue = new LinkedBlockingDeque<>(QUEUE_CAPACITY);
         final BlockingQueue<List<String>> logQueue = new LinkedBlockingDeque<>(QUEUE_LOGS_CAPACITY);
 
@@ -446,7 +448,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                 e.printStackTrace();
             }
 
-            while (!queue.isEmpty()){
+            while (!queue.isEmpty()) {
                 try {
                     Thread.sleep(10);
                 } catch (InterruptedException e) {
@@ -466,14 +468,13 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
 
 
         }
-       while (!recService.isTerminated()||!sorter.isTerminatedService()){
+        while (!recService.isTerminated() || !sorter.isTerminatedService()) {
             try {
                 Thread.sleep(10);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }
-
 
 
         log.info("Finished reading - moving on to scanning for duplicates.");
@@ -489,15 +490,15 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
 
 
         // Now go through the sorted reads and attempt to find duplicates
-        final PeekableIterator<PairedReadSequence> iterator = new PeekableIterator<PairedReadSequence>(sorter.iterator());
 
+        final PeekableIterator<PairedReadSequence> iterator = new PeekableIterator<PairedReadSequence>(sorter.iterator());
         final Map<String, Histogram<Integer>> duplicationHistosByLibrary = new ConcurrentHashMap<String, Histogram<Integer>>();
         final Map<String, Histogram<Integer>> opticalHistosByLibrary = new ConcurrentHashMap<String, Histogram<Integer>>();
 
         int groupsProcessed = 0;
         long lastLogTime = System.currentTimeMillis();
         final int meanGroupSize = Math.max(1, (recordsRead / 2) / (int) pow(4, MIN_IDENTICAL_BASES * 2));
-        final ExecutorService logService = Executors.newCachedThreadPool();
+        final ExecutorService logService = Executors.newFixedThreadPool(MAX_THREADS);
         logService.execute(new Runnable() {
             @Override
             public void run() {
@@ -527,9 +528,10 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
             }
         });
 
-        final BlockingQueue<List<List<PairedReadSequence>>> groupQueue =  new LinkedBlockingDeque<>(QUEUE_GROUP_CAPACITY);
-        final ExecutorService groupService = Executors.newCachedThreadPool();
+        final BlockingQueue<List<List<PairedReadSequence>>> groupQueue = new LinkedBlockingDeque<>(QUEUE_GROUP_CAPACITY);
+        final ExecutorService groupService = Executors.newFixedThreadPool(MAX_THREADS);
         List<List<PairedReadSequence>> tmpGroups = new ArrayList<>(MAX_GROUPS);
+
 
 
         groupService.execute(new Runnable() {
@@ -538,14 +540,14 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                 while (true) {
                     try {
                         final List<List<PairedReadSequence>> tmpGrp = groupQueue.take();
-                        if (tmpGrp.isEmpty()){
+                        if (tmpGrp.isEmpty()) {
                             return;
                         }
                         sem.acquire();
                         groupService.submit(new Runnable() {
                             @Override
                             public void run() {
-                                for(List<PairedReadSequence> grp:tmpGrp){
+                                for (List<PairedReadSequence> grp : tmpGrp) {
 
                                     final Map<String, List<PairedReadSequence>> sequencesByLibrary = splitByLibrary(grp, readGroups);
 
@@ -586,14 +588,16 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
 
                                                 final boolean[] flags = opticalDuplicateFinder.findOpticalDuplicates(dupes);
                                                 for (final boolean b : flags) {
+
                                                     if (b) opticalHisto.increment(duplicateCount);
+
                                                 }
                                             } else {
                                                 duplicationHisto.increment(1);
                                             }
+
                                         }
                                     }
-
 
 
                                 }
@@ -628,7 +632,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                         " / " +
                         StringUtil.bytesToString(prs.read1, 0, MIN_IDENTICAL_BASES));
 
-                if (logs.size()<MAX_LOGS){
+                if (logs.size() < MAX_LOGS) {
                     continue;
                 }
                 try {
@@ -647,7 +651,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                     lastLogTime = System.currentTimeMillis();
                 }
 
-                if (tmpGroups.size()<MAX_GROUPS){
+                if (tmpGroups.size() < MAX_GROUPS) {
                     continue;
                 }
                 try {
@@ -672,7 +676,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
             e.printStackTrace();
         }
 
-        while(!groupQueue.isEmpty()){
+        while (!groupQueue.isEmpty()) {
             try {
                 Thread.sleep(10);
             } catch (InterruptedException e) {
@@ -683,8 +687,8 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
         logService.shutdown();
 
         try {
-            groupService.awaitTermination(1,TimeUnit.DAYS);
-            logService.awaitTermination(1,TimeUnit.DAYS);
+            groupService.awaitTermination(1, TimeUnit.DAYS);
+            logService.awaitTermination(1, TimeUnit.DAYS);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
@@ -704,7 +708,8 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
 //        sorter.serviceShutdown();
         sorter.cleanup();
 
-        while (!groupService.isTerminated()||!logService.isTerminated()){
+
+        while (!groupService.isTerminated() || !logService.isTerminated()) {
             try {
                 Thread.sleep(10);
             } catch (InterruptedException e) {
@@ -714,6 +719,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
 
         final MetricsFile<DuplicationMetrics, Integer> file = getMetricsFile();
         for (final String library : duplicationHistosByLibrary.keySet()) {
+//            System.out.println(library + " ");
             final Histogram<Integer> duplicationHisto = duplicationHistosByLibrary.get(library);
             final Histogram<Integer> opticalHisto = opticalHistosByLibrary.get(library);
             final DuplicationMetrics metrics = new DuplicationMetrics();
@@ -721,9 +727,9 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
 
             // Filter out any bins that have only a single entry in them and calcu
             for (final Integer bin : duplicationHisto.keySet()) {
+
                 final double duplicateGroups = duplicationHisto.get(bin).getValue();
                 final double opticalDuplicates = opticalHisto.get(bin) == null ? 0 : opticalHisto.get(bin).getValue();
-
                 if (duplicateGroups > 1) {
                     metrics.READ_PAIRS_EXAMINED += (bin * duplicateGroups);
                     metrics.READ_PAIR_DUPLICATES += ((bin - 1) * duplicateGroups);
@@ -736,6 +742,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
             file.addHistogram(duplicationHisto);
 
         }
+
 
         file.write(OUTPUT);
 
