@@ -286,8 +286,9 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                 if (retval != 0) return retval;
             }
 
+                return lhs.read1.length-rhs.read1.length;
 //            return System.identityHashCode(lhs) - System.identityHashCode(rhs);
-            return 0;
+//            return 0;
         }
     }
 
@@ -550,7 +551,7 @@ public class EstimateLibraryComplexity extends AbstractOpticalDuplicateFinderCom
                 }
             }
         }
-       
+
 
 
 
