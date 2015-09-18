@@ -151,7 +151,7 @@ public class SortVcf extends CommandLineProgram {
         for (final VCFFileReader reader : readers) {
             log.info("Reading entries from input file " + readerCount);
             for (final VariantContext variantContext : reader) {
-                sorter.add(variantContext);
+                sorter.add(variantContext, 10000);
                 readProgress.record(variantContext.getChr(), variantContext.getStart());
             }
             reader.close();

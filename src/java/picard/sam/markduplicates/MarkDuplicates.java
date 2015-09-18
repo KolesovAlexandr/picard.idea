@@ -278,7 +278,7 @@ public class MarkDuplicates extends AbstractMarkDuplicatesCommandLineProgram {
                 // If this read is unmapped but sorted with the mapped reads, just skip it.
             } else if (!rec.isSecondaryOrSupplementary()) {
                 final ReadEndsForMarkDuplicates fragmentEnd = buildReadEnds(header, index, rec);
-                this.fragSort.add(fragmentEnd);
+                this.fragSort.add(fragmentEnd, 10000);
 
                 if (rec.getReadPairedFlag() && !rec.getMateUnmappedFlag()) {
                     final String key = rec.getAttribute(ReservedTagConstants.READ_GROUP_ID) + ":" + rec.getReadName();
@@ -320,7 +320,7 @@ public class MarkDuplicates extends AbstractMarkDuplicatesCommandLineProgram {
                         }
 
                         pairedEnds.score += DuplicateScoringStrategy.computeDuplicateScore(rec, this.DUPLICATE_SCORING_STRATEGY);
-                        this.pairSort.add(pairedEnds);
+                        this.pairSort.add(pairedEnds, 10000);
                     }
                 }
             }

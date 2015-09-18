@@ -163,7 +163,7 @@ public class FixMateInformation extends CommandLineProgram {
                         MAX_RECORDS_IN_RAM,
                         TMP_DIR);
                 while (tmp.hasNext()) {
-                    sorter.add(tmp.next());
+                    sorter.add(tmp.next(), 10000);
 
                 }
 

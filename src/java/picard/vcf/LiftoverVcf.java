@@ -201,7 +201,7 @@ public class LiftoverVcf extends CommandLineProgram {
                     failedAlleleCheck++;
                 }
                 else {
-                    sorter.add(builder.make());
+                    sorter.add(builder.make(), 10000);
                 }
             }
 

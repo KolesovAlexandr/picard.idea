@@ -13,9 +13,7 @@ import htsjdk.samtools.SamFileHeaderMerger;
 import htsjdk.samtools.SamPairUtil;
 import htsjdk.samtools.SamReader;
 import htsjdk.samtools.SamReaderFactory;
-import htsjdk.samtools.ValidationStringency;
 import htsjdk.samtools.util.CloseableIterator;
-import htsjdk.samtools.util.CloserUtil;
 import htsjdk.samtools.util.DelegatingIterator;
 import htsjdk.samtools.util.IOUtil;
 import htsjdk.samtools.util.Log;
@@ -198,7 +196,7 @@ public class SamAlignmentMerger extends AbstractAlignmentMerger {
 
         int count = 0;
         while (mergingIterator.hasNext()) {
-            alignmentSorter.add(mergingIterator.next());
+            alignmentSorter.add(mergingIterator.next(), 10000);
             count++;
             if (count > 0 && count % 1000000 == 0) {
                 log.info("Read " + count + " records from alignment SAM/BAM.");

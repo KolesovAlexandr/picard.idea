@@ -216,7 +216,7 @@ public class RevertSam extends CommandLineProgram {
             // Actually to the reverting of the remaining records
             revertSamRecord(rec);
 
-            if (sanitizing) sorter.add(rec);
+            if (sanitizing) sorter.add(rec, 10000);
             else out.addAlignment(rec);
             progress.record(rec);
         }

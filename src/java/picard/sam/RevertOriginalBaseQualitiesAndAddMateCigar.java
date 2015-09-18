@@ -109,7 +109,7 @@ public class RevertOriginalBaseQualitiesAndAddMateCigar extends CommandLineProgr
             }
             if (!foundPairedMappedReads && record.getReadPairedFlag() && !record.getReadUnmappedFlag()) foundPairedMappedReads = true;
             revertingProgress.record(record);
-            sorter.add(record);
+            sorter.add(record, 10000);
         }
         CloserUtil.close(in);
         log.info("Reverted the original base qualities for " + numOriginalQualitiesRestored + " records");

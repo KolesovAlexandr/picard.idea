@@ -145,7 +145,7 @@ public abstract class AbstractAlignmentMerger {
         /** Adds a record to the sink. */
         void add(final SAMRecord rec) {
             if (writer != null) writer.addAlignment(rec);
-            if (sorter != null) sorter.add(rec);
+            if (sorter != null) sorter.add(rec, 10000);
         }
 
         /** Closes the underlying resource. */

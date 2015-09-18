@@ -432,7 +432,7 @@ public class IlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> {
                 this.barcodeToRecordCollection.put(barcode, recordCollection);
                 this.barcodeToProcessingState.put(barcode, null);
             }
-            recordCollection.add(record);
+            recordCollection.add(record, 10000);
         }
 
         private synchronized SortingCollection<CLUSTER_OUTPUT_RECORD> newSortingCollection() {
