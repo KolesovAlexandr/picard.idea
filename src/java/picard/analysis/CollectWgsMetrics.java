@@ -24,16 +24,8 @@ import picard.util.MathUtil;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicLongArray;
 
 /**
  * Computes a number of metrics that are useful for evaluating coverage and performance of whole genome sequencing experiments.
@@ -48,10 +40,7 @@ import java.util.concurrent.atomic.AtomicLongArray;
 )
 public class CollectWgsMetrics extends CommandLineProgram {
 
-    private static final int QUEUE_CAPACITY = 2;
-    private static final int MAX_THREADS = Runtime.getRuntime().availableProcessors() * 2;
-    private static final int MAX_SEM_QUE = MAX_THREADS * 2;
-    private static final int PACK_SIZE = 25;
+    public static final int ARRAYLENGTH = 350;
     @Option(shortName = StandardOptionDefinitions.INPUT_SHORT_NAME, doc = "Input SAM or BAM file.")
     public File INPUT;
 
@@ -80,7 +69,6 @@ public class CollectWgsMetrics extends CommandLineProgram {
     public boolean COUNT_UNPAIRED = false;
 
     private final Log log = Log.getInstance(CollectWgsMetrics.class);
-
 
     /** Metrics for evaluating the performance of whole genome sequencing experiments. */
     public static class WgsMetrics extends MetricBase {
@@ -158,15 +146,6 @@ public class CollectWgsMetrics extends CommandLineProgram {
         final CountingFilter dupeFilter = new CountingDuplicateFilter();
         final CountingFilter mapqFilter = new CountingMapQFilter(MINIMUM_MAPPING_QUALITY);
         final CountingPairedFilter pairFilter = new CountingPairedFilter();
-
-//        final ExecutorService service = Executors.newFixedThreadPool(MAX_THREADS);
-
-        final BlockingQueue<List<SamLocusIterator.LocusInfo>> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
-        final ThreadPoolExecutor service = new ThreadPoolExecutor(MAX_THREADS,MAX_THREADS,0L,TimeUnit.SECONDS,
-                new LinkedBlockingQueue<Runnable>());
-        final Semaphore sem = new Semaphore(MAX_SEM_QUE);
-
-
         filters.add(mapqFilter);
         filters.add(dupeFilter);
         if (!COUNT_UNPAIRED) {
@@ -179,166 +158,127 @@ public class CollectWgsMetrics extends CommandLineProgram {
         iterator.setQualityScoreCutoff(0);        // Handled separately because we want to count bases
         iterator.setIncludeNonPfReads(false);
 
-
         final int max = COVERAGE_CAP;
-
-        final AtomicLongArray histogramArray = new AtomicLongArray(max + 1);
-       /* for (int i = 0; i < histogramArray.length; i++) {
-            histogramArray[i] = new AtomicLong(0);
-        }*/
-
-
-        final AtomicLongArray baseQHistogramArray = new AtomicLongArray(Byte.MAX_VALUE);
-      /*  for (int i = 0; i < baseQHistogramArray.length(); i++) {
-            baseQHistogramArray.get(i) = new AtomicLong(0);
-        }*/
-
-
+        final long[] HistogramArray = new long[max + 1];
+        final long[] baseQHistogramArray = new long[Byte.MAX_VALUE];
         final boolean usingStopAfter = STOP_AFTER > 0;
         final long stopAfter = STOP_AFTER - 1;
         long counter = 0;
 
-        final AtomicLong basesExcludedByBaseq = new AtomicLong(0);
-        final AtomicLong basesExcludedByOverlap = new AtomicLong(0);
-        final AtomicLong basesExcludedByCapping = new AtomicLong(0);
-        List<SamLocusIterator.LocusInfo> packInf = new ArrayList<>(PACK_SIZE);
-        List<SamLocusIterator.LocusInfo> poisonPill = Collections.emptyList();
+        long basesExcludedByBaseq = 0;
+        long basesExcludedByOverlap = 0;
+        long basesExcludedByCapping = 0;
 
+        class MyClass {
+            private int _count;
+            private byte[] _qualities;
 
-        service.execute(new Runnable() {
-            @Override
-            public void run() {
-                while (true) {
-                    try {
-                        final List<SamLocusIterator.LocusInfo> packInf = queue.take();
-                        sem.acquire();
-                        if (packInf.isEmpty()) {
-                            return;
-                        }
-
-                        service.execute(new Runnable() {
-
-                            @Override
-                            public void run() {
-                                for (SamLocusIterator.LocusInfo inf : packInf) {
-                                    // Figure out the coverage while not counting overlapping reads twice, and excluding various things
-                                    final HashSet<String> readNames = new HashSet<String>(inf.getRecordAndPositions().size());
-                                    int pileupSize = 0;
-
-                                    for (final SamLocusIterator.RecordAndOffset recs : inf.getRecordAndPositions()) {
-
-
-                                        if (recs.getBaseQuality() < MINIMUM_BASE_QUALITY) {
-                                            basesExcludedByBaseq.incrementAndGet();
-                                            continue;
-                                        }
-                                        if (!readNames.add(recs.getRecord().getReadName())) {
-                                            basesExcludedByOverlap.incrementAndGet();
-                                            continue;
-                                        }
-                                        pileupSize++;
-                                        if (pileupSize <= max) {
-                                            baseQHistogramArray.incrementAndGet(recs.getRecord().getBaseQualities()[recs.getOffset()]);
-                                        }
-                                    }
-
-
-                                    final int depth = Math.min(readNames.size(), max);
-                                    if (depth < readNames.size()) basesExcludedByCapping.addAndGet(readNames.size() - max);
-                                    histogramArray.incrementAndGet(depth);
-                                    //                                HistogramArray[depth].incrementAndGet();
-
-                                }
-                                sem.release();
-                            }
-                        });
-
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-
-                }
-
+            public int getCount() {
+                return _count;
             }
-        });
+
+            public void incrimentCount() {
+                _count++;
+            }
+
+            public byte[] getQualities() {
+                return _qualities;
+            }
+
+            public void setQualitiesForOne(int i,byte value){ _qualities[i] = value;}
+
+            public void setQualities(byte[] qualities, int length) {
+                _qualities = new byte[length];
+                for (int i = 0; i < _qualities.length; i++) {
+                    _qualities[i] = qualities[i];
+                }
+            }
+        }
+
 
         // Loop through all the loci
+        int shift = 0;
+        byte[] qArray = new byte[ARRAYLENGTH];
+        MyClass[] qArrays = new MyClass[ARRAYLENGTH];
         while (iterator.hasNext()) {
             final SamLocusIterator.LocusInfo info = iterator.next();
 
             // Check that the reference is not N
             final ReferenceSequence ref = refWalker.get(info.getSequenceIndex());
             final byte base = ref.getBases()[info.getPosition() - 1];
-
             if (base == 'N') continue;
 
 
+            // Figure out the coverage while not counting overlapping reads twice, and excluding various things
+            final HashSet<String> readNames = new HashSet<String>(info.getRecordAndPositions().size());
+            int pileupSize = 0;
+
+            for (final SamLocusIterator.RecordAndOffset recs : info.getRecordAndPositions()) {
+//                MyRecs recs = (MyRecs) recs2;
+
+                if (!recs.isProcessed()) {
+                    final int length = recs.getRecord().getBaseQualities().length;
+//                    if (length + info.getPosition() >= qArray.length) {
+                    if (length + info.getPosition() >= qArrays.length){
+                        if (info.getPosition() < qArrays.length) {
+//                            byte[] tmpArray = new byte[ARRAYLENGTH];
+                            MyClass[] tmpArray = new MyClass[ARRAYLENGTH];
+                            System.arraycopy(qArrays, info.getPosition(), tmpArray, 0, qArrays.length - info.getPosition());
+                            qArrays = tmpArray;
+                            shift = info.getPosition();
+                        } else {
+//                            qArray = new byte[ARRAYLENGTH];
+                            qArrays =new MyClass[ARRAYLENGTH];
+                            shift = info.getPosition();
+                        }
+                    }
+                    for (int i = recs.getOffset(); i < length; i++) {
+                        if (recs.getRecord().getBaseQualities()[i] < MINIMUM_BASE_QUALITY) {
+                            qArrays[i - recs.getOffset() + info.getPosition() - shift].incrimentCount();
+                        }
+
+                    }
+                    recs.process();
+                }
+
+                if (qArrays[info.getPosition() + recs.getOffset() - shift].getCount() > 0) {
+                    basesExcludedByCapping += qArrays[info.getPosition() + recs.getOffset() - shift].getCount();
+                    continue;
+                }
+
+
+                // if (recs.getBaseQuality() < MINIMUM_BASE_QUALITY)                   { ++basesExcludedByBaseq;   continue; }
+
+                if (!readNames.add(recs.getRecord().getReadName())) {
+                    ++basesExcludedByOverlap;
+                    continue;
+                }
+                pileupSize++;
+                if (pileupSize <= max) {
+                    baseQHistogramArray[recs.getRecord().getBaseQualities()[recs.getOffset()]]++;
+                }
+            }
+
+            final int depth = Math.min(readNames.size(), max);
+            if (depth < readNames.size()) basesExcludedByCapping += readNames.size() - max;
+            HistogramArray[depth]++;
+
             // Record progress and perhaps stop
             progress.record(info.getSequenceName(), info.getPosition());
-
             if (usingStopAfter && ++counter > stopAfter) break;
-
-            packInf.add(info);
-            if (packInf.size() < PACK_SIZE) {
-                continue;
-            }
-            final List<SamLocusIterator.LocusInfo> tmpPackInf = packInf;
-            packInf = new ArrayList<>(PACK_SIZE);
-
-
-            try {
-                queue.put(tmpPackInf);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-
         }
-
-        while (!queue.isEmpty()) {
-            try {
-                Thread.sleep(10);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
-
-        try {
-            queue.put(poisonPill);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        service.shutdown();
-        try {
-            service.awaitTermination(1, TimeUnit.DAYS);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        while (!service.isTerminated()) {
-            try {
-                Thread.sleep(10);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
-
 
         // Construct and write the outputs
         final Histogram<Integer> histo = new Histogram<Integer>("coverage", "count");
-        long[] histogramArrayNoAtomic = new long[histogramArray.length()];
-        for (int i = 0; i < histogramArray.length(); ++i) {
-            histogramArrayNoAtomic[i] = histogramArray.get(i);
-            histo.increment(i, histogramArray.get(i));
+        for (int i = 0; i < HistogramArray.length; ++i) {
+            histo.increment(i, HistogramArray[i]);
         }
-
 
         // Construct and write the outputs
         final Histogram<Integer> baseQHisto = new Histogram<Integer>("value", "baseq_count");
-        for (int i = 0; i < baseQHistogramArray.length(); ++i) {
-            baseQHisto.increment(i, baseQHistogramArray.get(i));
+        for (int i = 0; i < baseQHistogramArray.length; ++i) {
+            baseQHisto.increment(i, baseQHistogramArray[i]);
         }
-
 
         final WgsMetrics metrics = generateWgsMetrics();
         metrics.GENOME_TERRITORY = (long) histo.getSumOfValues();
@@ -351,29 +291,28 @@ public class CollectWgsMetrics extends CommandLineProgram {
         final long basesExcludedByMapq = getBasesExcludedBy(mapqFilter);
         final long basesExcludedByPairing = getBasesExcludedBy(pairFilter);
         final double total = histo.getSum();
-        final double totalWithExcludes = total + basesExcludedByDupes + basesExcludedByMapq + basesExcludedByPairing
-                + basesExcludedByBaseq.get() + basesExcludedByOverlap.get() + basesExcludedByCapping.get();
+        final double totalWithExcludes = total + basesExcludedByDupes + basesExcludedByMapq + basesExcludedByPairing + basesExcludedByBaseq + basesExcludedByOverlap + basesExcludedByCapping;
         metrics.PCT_EXC_DUPE = basesExcludedByDupes / totalWithExcludes;
         metrics.PCT_EXC_MAPQ = basesExcludedByMapq / totalWithExcludes;
         metrics.PCT_EXC_UNPAIRED = basesExcludedByPairing / totalWithExcludes;
-        metrics.PCT_EXC_BASEQ = basesExcludedByBaseq.get() / totalWithExcludes;
-        metrics.PCT_EXC_OVERLAP = basesExcludedByOverlap.get() / totalWithExcludes;
-        metrics.PCT_EXC_CAPPED = basesExcludedByCapping.get() / totalWithExcludes;
+        metrics.PCT_EXC_BASEQ = basesExcludedByBaseq / totalWithExcludes;
+        metrics.PCT_EXC_OVERLAP = basesExcludedByOverlap / totalWithExcludes;
+        metrics.PCT_EXC_CAPPED = basesExcludedByCapping / totalWithExcludes;
         metrics.PCT_EXC_TOTAL = (totalWithExcludes - total) / totalWithExcludes;
 
-        metrics.PCT_5X = MathUtil.sum(histogramArrayNoAtomic, 5, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_10X = MathUtil.sum(histogramArrayNoAtomic, 10, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_15X = MathUtil.sum(histogramArrayNoAtomic, 15, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_20X = MathUtil.sum(histogramArrayNoAtomic, 20, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_25X = MathUtil.sum(histogramArrayNoAtomic, 25, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_30X = MathUtil.sum(histogramArrayNoAtomic, 30, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_40X = MathUtil.sum(histogramArrayNoAtomic, 40, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_50X = MathUtil.sum(histogramArrayNoAtomic, 50, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_60X = MathUtil.sum(histogramArrayNoAtomic, 60, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_70X = MathUtil.sum(histogramArrayNoAtomic, 70, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_80X = MathUtil.sum(histogramArrayNoAtomic, 80, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_90X = MathUtil.sum(histogramArrayNoAtomic, 90, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
-        metrics.PCT_100X = MathUtil.sum(histogramArrayNoAtomic, 100, histogramArray.length()) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_5X = MathUtil.sum(HistogramArray, 5, HistogramArray.length) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_10X = MathUtil.sum(HistogramArray, 10, HistogramArray.length) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_15X = MathUtil.sum(HistogramArray, 15, HistogramArray.length) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_20X = MathUtil.sum(HistogramArray, 20, HistogramArray.length) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_25X = MathUtil.sum(HistogramArray, 25, HistogramArray.length) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_30X = MathUtil.sum(HistogramArray, 30, HistogramArray.length) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_40X = MathUtil.sum(HistogramArray, 40, HistogramArray.length) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_50X = MathUtil.sum(HistogramArray, 50, HistogramArray.length) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_60X = MathUtil.sum(HistogramArray, 60, HistogramArray.length) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_70X = MathUtil.sum(HistogramArray, 70, HistogramArray.length) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_80X = MathUtil.sum(HistogramArray, 80, HistogramArray.length) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_90X = MathUtil.sum(HistogramArray, 90, HistogramArray.length) / (double) metrics.GENOME_TERRITORY;
+        metrics.PCT_100X = MathUtil.sum(HistogramArray, 100, HistogramArray.length) / (double) metrics.GENOME_TERRITORY;
 
         final MetricsFile<WgsMetrics, Integer> out = getMetricsFile();
         out.addMetric(metrics);
@@ -397,7 +336,6 @@ public class CollectWgsMetrics extends CommandLineProgram {
     protected SamLocusIterator getLocusIterator(final SamReader in) {
         return new SamLocusIterator(in);
     }
-
 }
 
 /**
