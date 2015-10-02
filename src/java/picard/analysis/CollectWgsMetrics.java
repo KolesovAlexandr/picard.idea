@@ -41,6 +41,7 @@ import java.util.List;
 public class CollectWgsMetrics extends CommandLineProgram {
 
     public static final int ARRAYLENGTH = 350;
+    private static final byte BAD_QUALITY = -1;
     @Option(shortName = StandardOptionDefinitions.INPUT_SHORT_NAME, doc = "Input SAM or BAM file.")
     public File INPUT;
 
@@ -212,7 +213,7 @@ public class CollectWgsMetrics extends CommandLineProgram {
             public void shiftArray(final int position) {
 
                 List<Integer> lst = new ArrayList<>(_length);
-                
+
 
                 int tmpCount[] = new int[_length];
                 byte[][] tmpQuality = new byte[_length][];
@@ -231,6 +232,7 @@ public class CollectWgsMetrics extends CommandLineProgram {
         CWgsQualities cWgsQualities = new CWgsQualities(ARRAYLENGTH);
         // Loop through all the loci
         while (iterator.hasNext()) {
+
             final SamLocusIterator.LocusInfo info = iterator.next();
 
             // Check that the reference is not N
@@ -245,6 +247,8 @@ public class CollectWgsMetrics extends CommandLineProgram {
 
             for (final SamLocusIterator.RecordAndOffset recs : info.getRecordAndPositions()) {
 
+//                List<Integer> tt = new ArrayList<>(1000);
+//                boolean bae = false;
                 if (!recs.isProcessed()) {
 
                     final int length = recs.getRecord().getBaseQualities().length;
@@ -260,32 +264,54 @@ public class CollectWgsMetrics extends CommandLineProgram {
                     for (int i = recs.getOffset(); i < length; i++) {
                         final byte quality = recs.getRecord().getBaseQualities()[i];
                         if (quality < MINIMUM_BASE_QUALITY) {
+
+//                            if (i==recs.getOffset()) bae =true;
+
                             cWgsQualities.incrimentCount(i - recs.getOffset() + info.getPosition() - shift);
+                            cWgsQualities.setQualitiesForOne(info.getPosition() - shift, i, BAD_QUALITY, length);
+
                         } else {
+                            //TODO 1 raz +
+                            if (!readNames.add(recs.getRecord().getReadName())) {
+                                pileupSize++;
+                                if (pileupSize <= max) {
+
+                                    final byte[] qualities = cWgsQualities.getQualities()[info.getPosition() - shift];
+                                    if (qualities != null) {
+                                        if (qualities[recs.getOffset()] != BAD_QUALITY) baseQHistogramArray[qualities[recs.getOffset()]]++;
+                                    }
+                                }
+                            }
+//TODO add Array overlap
+//                            tmpbaseQHistogramArray[quality]++;
+
                             cWgsQualities.setQualitiesForOne(info.getPosition() - shift, i, quality, length);
                         }
                     }
                     recs.process();
                 }
 
-                if (cWgsQualities.getCount()[info.getPosition() + recs.getOffset() - shift] > 0) {
+//                if(bae) continue;
+
+
+
+                /*if (cWgsQualities.getCount()[info.getPosition() + recs.getOffset() - shift] > 0) {
                     basesExcludedByCapping += cWgsQualities.getCount()[info.getPosition() + recs.getOffset() - shift];
                     continue;
-                }
+                }*/
+
+
 
 
                 if (!readNames.add(recs.getRecord().getReadName())) {
-                    ++basesExcludedByOverlap;
-                    continue;
+                    ++basesExcludedByOverlap;//TODO iz massiva
+//                    continue;
                 }
-                pileupSize++;
-                if (pileupSize <= max) {
+            }
 
-                    final byte[] qualities = cWgsQualities.getQualities()[info.getPosition() - shift];
-                    if (qualities != null) {
-                        baseQHistogramArray[qualities[recs.getOffset()]]++;
-                    }
-                }
+            if (cWgsQualities.getCount()[info.getPosition()- shift] > 0) {
+                basesExcludedByCapping += cWgsQualities.getCount()[info.getPosition() - shift];
+                continue;
             }
 
             final int depth = Math.min(readNames.size(), max);
