@@ -49,5 +49,6 @@
         <jarDirectory url="file://$MODULE_DIR$/htsjdk/lib/testng" recursive="false" />
       </library>
     </orderEntry>
+    <orderEntry type="library" name="guava-15.0" level="project" />
   </component>
 </module>
