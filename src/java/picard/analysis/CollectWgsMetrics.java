@@ -20,6 +20,7 @@ import picard.cmdline.CommandLineProgramProperties;
 import picard.cmdline.Option;
 import picard.cmdline.StandardOptionDefinitions;
 import picard.cmdline.programgroups.Metrics;
+import picard.util.LoopArray;
 import picard.util.MathUtil;
 
 import java.io.File;
@@ -170,7 +171,12 @@ public class CollectWgsMetrics extends CommandLineProgram {
         long basesExcludedByOverlap = 0;
         long basesExcludedByCapping = 0;
 
+
+
         class CWgsQualities {
+            LoopArray countBasesExcludedByBaseq;
+            LoopArray countBasesExcludedByOverlap;
+
             private int[] _countBasesExcludedByBaseq;
             private int[] _countBasesExcludedByOverlap;
 
@@ -265,8 +271,6 @@ public class CollectWgsMetrics extends CommandLineProgram {
 
             public void setTmpQualities(int i) {
                 _tmpQualitiesCount[i]++;
-
-
             }
 
             public void clearTmpQualities() {
@@ -279,8 +283,6 @@ public class CollectWgsMetrics extends CommandLineProgram {
                 }
                 clearTmpQualities();
             }
-
-
 //            public void setQualities(int offset, byte[] qualities, int length) {
 //                _qualities[offset] = new byte[length];
 //                for (int i = 0; i < _qualities.length; i++) {
@@ -329,6 +331,7 @@ public class CollectWgsMetrics extends CommandLineProgram {
         while (iterator.hasNext()) {
 
             final SamLocusIterator.LocusInfo info = iterator.next();
+            if (info.getPosition()==4) return 0;
 
             // Check that the reference is not N
             final ReferenceSequence ref = refWalker.get(info.getSequenceIndex());
@@ -339,16 +342,30 @@ public class CollectWgsMetrics extends CommandLineProgram {
             // Figure out the coverage while not counting overlapping reads twice, and excluding various things
             final HashSet<String> readNames = new HashSet<String>(info.getRecordAndPositions().size());
             int pileupSize = 0;
-
+            int count = -1;
             for (final SamLocusIterator.RecordAndOffset recs : info.getRecordAndPositions()) {
+                final String readName = recs.getRecord().getReadName();
+//                count++;
+//                if (count==1831){
+//                    System.out.println();
+//                }
+
 
                 if (!recs.isRecordProcessed()) {
+
+//                    if (recs.getRecord().getReadName().equals("H05DUALXX:3:2108:163847:0"))
+//                    {
+//                        if (info.getPosition()==3)
+//                            System.out.println(count);
+//                    }
+                    boolean basesIsExcludedByOverlap = false;
+
+                    basesIsExcludedByOverlap = readNames.add(readName);
 
                     final int length = recs.getRecord().getBaseQualities().length;
 
                     boolean pileupsSizeIncrmentIsFirst = true;
-                    boolean basesExcludedByOverlapIsFirst = true;
-                    boolean basesIsExcludedByOverlap = false;
+                    boolean basesExcludedByOverlapIsFirst = false;
 
 
                     for (int i = recs.getOffset(); i < length; i++) {
@@ -359,25 +376,26 @@ public class CollectWgsMetrics extends CommandLineProgram {
                             cWgsQualities.incrimentCountBasesExcludedByBaseq(index);
 //  cWgsQualities.setQualitiesForOne(info.getPosition() - shift, i, BAD_QUALITY, length);
                         } else {
-
-                            if (basesExcludedByOverlapIsFirst) {
-                                basesIsExcludedByOverlap = readNames.add(recs.getRecord().getReadName());
-                                basesExcludedByOverlapIsFirst = false;
-                            }
+                            basesExcludedByOverlapIsFirst = true;
+//                            if (basesExcludedByOverlapIsFirst) {
+//                                basesExcludedByOverlapIsFirst = false;
+//                            }
                             if (!basesIsExcludedByOverlap) {
                                 cWgsQualities.incrimentCountBasesExcludedByOverlap(index);
-                            } else {
-                                cWgsQualities.incrimentReadNameSize(index);
-                                if (pileupsSizeIncrmentIsFirst) {
-                                    pileupSize++;
+                                if (pileupsSizeIncrmentIsFirst){
+//                                    if (info.getPosition()<=3) System.out.println(count);
                                     pileupsSizeIncrmentIsFirst = false;
                                 }
-                                if (pileupSize<= max) {
-                                    cWgsQualities.setTmpQualities(quality);
-                                }
-
+                            } else {
+                                cWgsQualities.incrimentReadNameSize(index);
+//                                if (pileupsSizeIncrmentIsFirst) {
+//                                    pileupSize++;
+//                                    pileupsSizeIncrmentIsFirst = false;
+//                                }
+//                                if (pileupSize<= max) {
+//                                    cWgsQualities.setTmpQualities(quality);
+//                                }
                             }
-
                             //TODO 1 raz +
 //                            if (pileupsSizeIncrmentIsFirst) {
 //                            }
@@ -394,13 +412,14 @@ public class CollectWgsMetrics extends CommandLineProgram {
 //                            cWgsQualities.setQualitiesForOne(info.getPosition() - shift, i, quality, length);
                         }
                     }
+                    if (!basesExcludedByOverlapIsFirst) readNames.remove(readName);
+
                     recs.processRecord();
                 }
-
-                /*if (cWgsQualities.getCountBasesExcludedByBaseq()[info.getPosition() + recs.getOffset() - shift] > 0) {
-                    basesExcludedByCapping += cWgsQualities.getCountBasesExcludedByBaseq()[info.getPosition() + recs.getOffset() - shift];
-                    continue;
-                }*/
+//                if (cWgsQualities.getCountBasesExcludedByBaseq()[info.getPosition() + recs.getOffset() - shift] > 0) {
+//                    basesExcludedByCapping += cWgsQualities.getCountBasesExcludedByBaseq()[info.getPosition() + recs.getOffset() - shift];
+//                    continue;
+//                }
 
 //                if (!readNames.add(recs.getRecord().getReadName())) {
 //                    ++basesExcludedByOverlap;//TODO iz massiva
