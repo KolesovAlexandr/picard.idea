@@ -176,153 +176,63 @@ public class CollectWgsMetrics extends CommandLineProgram {
         class CWgsQualities {
             LoopArray countBasesExcludedByBaseq;
             LoopArray countBasesExcludedByOverlap;
+            LoopArray readNameSize;
 
-            private int[] _countBasesExcludedByBaseq;
-            private int[] _countBasesExcludedByOverlap;
+           public CWgsQualities(int length){
+               countBasesExcludedByBaseq = new LoopArray(length);
+               countBasesExcludedByOverlap = new LoopArray(length);
+               readNameSize = new LoopArray(length);
+           }
+            public void calculateRead(SamLocusIterator.RecordAndOffset recs, HashSet<String> readNames, final int position){
+                final String readName = recs.getRecord().getReadName();
 
-            private int[] _passCount;
-            private byte[][] _qualities;
-            private long[] _qualitiesCount;
-            private int _length;
-            int _index;
-            int _pass;
-            private long[] _tmpQualitiesCount;
-            private int[] _readNamesSize;
+                if (!recs.isRecordProcessed()) {
+                    boolean basesIsExcludedByOverlap = false;
+                    basesIsExcludedByOverlap = readNames.add(readName);
+                    final int length = recs.getRecord().getBaseQualities().length;
+                    boolean pileupsSizeIncrmentIsFirst = true;
+                    boolean basesExcludedByOverlapIsFirst = false;
+                    for (int i = recs.getOffset(); i < length; i++) {
+                        final byte quality = recs.getRecord().getBaseQualities()[i];
+                        int indexBaseQ = countBasesExcludedByBaseq.getIndex(i-recs.getOffset()+position);
+                        int indexOverlap = countBasesExcludedByOverlap.getIndex(i-recs.getOffset()+position);
+                        int indexReadNamesSize = readNameSize.getIndex(i-recs.getOffset()+position);
+                        if (quality < MINIMUM_BASE_QUALITY) {
+                            countBasesExcludedByBaseq.incriment(indexBaseQ);
+                        } else {
+                            basesExcludedByOverlapIsFirst = true;
+                            if (!basesIsExcludedByOverlap) {
+                                countBasesExcludedByOverlap.incriment(indexOverlap);
+                                if (pileupsSizeIncrmentIsFirst){
+                                    pileupsSizeIncrmentIsFirst = false;
+                                }
+                            } else {
+                                readNameSize.incriment(indexReadNamesSize);
+                            }
+                        }
+                    }
+                    if (!basesExcludedByOverlapIsFirst) readNames.remove(readName);
 
-            public CWgsQualities(int length) {
-                _countBasesExcludedByBaseq = new int[length];
-                _countBasesExcludedByOverlap = new int[length];
-                _passCount = new int[length];
-                _qualities = new byte[length][];
-                _readNamesSize = new  int[length];
-                _tmpQualitiesCount = new long[Byte.MAX_VALUE];
-                _qualitiesCount = new long[Byte.MAX_VALUE];
-                _length = length;
-
-            }
-
-            public int getIndex(int i) {
-                _index = i % _length;
-                _pass = i / _length;
-                if (_passCount[_index] != _pass) {
-                    _countBasesExcludedByBaseq[_index] = 0;
-                    _countBasesExcludedByOverlap[_index] = 0;
-                    _readNamesSize[_index] = 0;
-                    _passCount[_index]=_pass;
-
+                    recs.processRecord();
                 }
 
-                return _index;
+            }
+            public int getIndex(int i){
+                return countBasesExcludedByBaseq.getIndex(i);
             }
 
-            public int getCountBasesExcludedByBaseq(int i) {
-//                int index = i % _length;
-//                int pass = i / _length;
-                if (_passCount[_index] != _pass) {
-                    System.out.println("Error");
-                }
-                return _countBasesExcludedByBaseq[i];
+            public  int getCountBasesExcludedByBaseq(int i){
+                return countBasesExcludedByBaseq.get(i);
             }
 
-            public void incrimentCountBasesExcludedByBaseq(int i) {
-
-//                int pass = i / _length;
-//                int index = i % _length;
-
-//                if (_passCount[index] != pass) {
-//                    _passCount[index] = pass;
-//                    _countBasesExcludedByBaseq[index] = 0;
-//                }
-                _countBasesExcludedByBaseq[i]++;
-
-            }
-
-            public int getCountBasesExcludedByOverlap(int i) {
-//                int index = i % _length;
-//                int pass = i / _length;
-                if (_passCount[_index] != _pass) {
-                    System.out.println("Error");
-                }
-                return _countBasesExcludedByOverlap[i];
-            }
-
-            public void incrimentCountBasesExcludedByOverlap(int i) {
-
-//                int pass = i / _length;
-//                int index = i % _length;
-//
-//                if (_passCount[index] != pass) {
-//                    _passCount[index] = pass;
-//                    _countBasesExcludedByBaseq[index] = 0;
-//                }
-                _countBasesExcludedByOverlap[i]++;
-
+            public  int getCountBasesExcludedByOverlap(int i){
+                return countBasesExcludedByOverlap.get(i);
             }
 
 
-            public byte[][] getQualities() {
-                return _qualities;
+            public int getReadNamesSize(int i) {
+                return readNameSize.get(i);
             }
-
-            public void setQualitiesForOne(int offset, int i, byte value, final int length) {
-                if (_qualities[offset] == null) _qualities[offset] = new byte[length];
-                _qualities[offset][i] = value;
-            }
-
-            public void setTmpQualities(int i) {
-                _tmpQualitiesCount[i]++;
-            }
-
-            public void clearTmpQualities() {
-                _tmpQualitiesCount = new long[Byte.MAX_VALUE];
-            }
-
-            public void calculateQualities() {
-                for (int i = 0; i < _tmpQualitiesCount.length; i++) {
-                    _qualitiesCount[i]+= _tmpQualitiesCount[i];
-                }
-                clearTmpQualities();
-            }
-//            public void setQualities(int offset, byte[] qualities, int length) {
-//                _qualities[offset] = new byte[length];
-//                for (int i = 0; i < _qualities.length; i++) {
-//                    _qualities[offset][i] = qualities[i];
-//                }
-//            }
-
-            public int length() {
-                return _length;
-            }
-
-            public long[] getQualitiesCount() {
-                return _qualitiesCount;
-            }
-
-            public void incrimentReadNameSize(final int i) {
-                _readNamesSize[i]++;
-            }
-
-            public int getReadNamesSize(final int i) {
-                return  _readNamesSize[i];
-            }
-
-
-//            public void shiftArray(final int position) {
-//
-//                List<Integer> lst = new ArrayList<>(_length);
-//
-//
-//                int tmpCount[] = new int[_length];
-//                byte[][] tmpQuality = new byte[_length][];
-////                System.arraycopy(_countBasesExcludedByBaseq, position, tmpCount, 0, _length - position);
-////                System.arraycopy(_qualities, position, tmpQuality, 0, _length - position);
-//                for (int i = position; i < _length; i++) {
-//                    tmpCount[i - position] = _countBasesExcludedByBaseq[i];
-//                    tmpQuality[i - position] = _qualities[i];
-//                }
-//                _countBasesExcludedByBaseq = tmpCount;
-//                _qualities = tmpQuality;
-//            }
         }
 
 //        int shift = 0;
@@ -342,89 +252,10 @@ public class CollectWgsMetrics extends CommandLineProgram {
             // Figure out the coverage while not counting overlapping reads twice, and excluding various things
             final HashSet<String> readNames = new HashSet<String>(info.getRecordAndPositions().size());
             int pileupSize = 0;
-            int count = -1;
+//            int count = -1;
             for (final SamLocusIterator.RecordAndOffset recs : info.getRecordAndPositions()) {
-                final String readName = recs.getRecord().getReadName();
-//                count++;
-//                if (count==1831){
-//                    System.out.println();
-//                }
 
-
-                if (!recs.isRecordProcessed()) {
-
-//                    if (recs.getRecord().getReadName().equals("H05DUALXX:3:2108:163847:0"))
-//                    {
-//                        if (info.getPosition()==3)
-//                            System.out.println(count);
-//                    }
-                    boolean basesIsExcludedByOverlap = false;
-
-                    basesIsExcludedByOverlap = readNames.add(readName);
-
-                    final int length = recs.getRecord().getBaseQualities().length;
-
-                    boolean pileupsSizeIncrmentIsFirst = true;
-                    boolean basesExcludedByOverlapIsFirst = false;
-
-
-                    for (int i = recs.getOffset(); i < length; i++) {
-                        final byte quality = recs.getRecord().getBaseQualities()[i];
-                        int index = cWgsQualities.getIndex(i-recs.getOffset()+info.getPosition());
-                        if (quality < MINIMUM_BASE_QUALITY) {
-//                            cWgsQualities.incrimentCountBasesExcludedByBaseq(i - recs.getOffset() + info.getPosition() - shift);
-                            cWgsQualities.incrimentCountBasesExcludedByBaseq(index);
-//  cWgsQualities.setQualitiesForOne(info.getPosition() - shift, i, BAD_QUALITY, length);
-                        } else {
-                            basesExcludedByOverlapIsFirst = true;
-//                            if (basesExcludedByOverlapIsFirst) {
-//                                basesExcludedByOverlapIsFirst = false;
-//                            }
-                            if (!basesIsExcludedByOverlap) {
-                                cWgsQualities.incrimentCountBasesExcludedByOverlap(index);
-                                if (pileupsSizeIncrmentIsFirst){
-//                                    if (info.getPosition()<=3) System.out.println(count);
-                                    pileupsSizeIncrmentIsFirst = false;
-                                }
-                            } else {
-                                cWgsQualities.incrimentReadNameSize(index);
-//                                if (pileupsSizeIncrmentIsFirst) {
-//                                    pileupSize++;
-//                                    pileupsSizeIncrmentIsFirst = false;
-//                                }
-//                                if (pileupSize<= max) {
-//                                    cWgsQualities.setTmpQualities(quality);
-//                                }
-                            }
-                            //TODO 1 raz +
-//                            if (pileupsSizeIncrmentIsFirst) {
-//                            }
-//                            if (pileupSize <= max) {
-//
-//                                final byte[] qualities = cWgsQualities.getQualities()[info.getPosition() - shift];
-//                                if (qualities != null) {
-//                                    if (qualities[recs.getOffset()] != BAD_QUALITY) baseQHistogramArray[qualities[recs.getOffset()]]++;
-//                                }
-//                            }
-//TODO add Array overlap
-//                            tmpbaseQHistogramArray[quality]++;
-
-//                            cWgsQualities.setQualitiesForOne(info.getPosition() - shift, i, quality, length);
-                        }
-                    }
-                    if (!basesExcludedByOverlapIsFirst) readNames.remove(readName);
-
-                    recs.processRecord();
-                }
-//                if (cWgsQualities.getCountBasesExcludedByBaseq()[info.getPosition() + recs.getOffset() - shift] > 0) {
-//                    basesExcludedByCapping += cWgsQualities.getCountBasesExcludedByBaseq()[info.getPosition() + recs.getOffset() - shift];
-//                    continue;
-//                }
-
-//                if (!readNames.add(recs.getRecord().getReadName())) {
-//                    ++basesExcludedByOverlap;//TODO iz massiva
-////                    continue;
-//                }
+                cWgsQualities.calculateRead(recs, readNames, info.getPosition());
             }
 
 //            if (cWgsQualities.getCountBasesExcludedByBaseq(info.getPosition()) > 0) {
@@ -446,22 +277,9 @@ public class CollectWgsMetrics extends CommandLineProgram {
             progress.record(info.getSequenceName(), info.getPosition());
             if (usingStopAfter && ++counter > stopAfter) break;
         }
-        baseQHistogramArray = cWgsQualities.getQualitiesCount();
+//        baseQHistogramArray = cWgsQualities.getQualitiesCount();
 
-//        System.out.println("basesExcludedByBaseq: "+basesExcludedByBaseq);
-//        System.out.println("basesExcludedByOverlap: "+basesExcludedByOverlap);
-////        System.out.println("depth: "+ depth);
-//        System.out.println("baseQHistogramArray:");
-//        for (int i = 0;i<baseQHistogramArray.length;i++){
-//            System.out.print(baseQHistogramArray[i] + " ");
-//        }
-//        System.out.println();
 //
-//        System.out.println("HistogramArray:");
-//
-//        for (int i = 0;i<HistogramArray.length;i++){
-//            System.out.print(HistogramArray[i]+" ");
-//        }
 
 
         // Construct and write the outputs
