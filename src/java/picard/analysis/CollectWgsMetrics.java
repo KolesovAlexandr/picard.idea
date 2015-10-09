@@ -24,6 +24,7 @@ import picard.util.MathUtil;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 
@@ -68,6 +69,7 @@ public class CollectWgsMetrics extends CommandLineProgram {
     public boolean COUNT_UNPAIRED = false;
 
     private final Log log = Log.getInstance(CollectWgsMetrics.class);
+    private HashMap<String,Integer> MapDuplacate;
 
     /** Metrics for evaluating the performance of whole genome sequencing experiments. */
     public static class WgsMetrics extends MetricBase {
@@ -167,17 +169,10 @@ public class CollectWgsMetrics extends CommandLineProgram {
         long basesExcludedByBaseq = 0;
         long basesExcludedByOverlap = 0;
         long basesExcludedByCapping = 0;
-//        HashMap<SAMRecord, byte[]> baseQ = new HashMap<>(350);
-        // Loop through all the loci
-//        int count;
-//        int first = -1;
-//        SAMRecord firstRecord;
+        MapDuplacate = new HashMap<>();
 
         while (iterator.hasNext()) {
             final SamLocusIterator.LocusInfo info = iterator.next();
-//            if (first == -1 ) info.getRecordAndPositions().get(1).getRecord();
-//            if (info.getPosition()==4) return 0;
-            // Check that the reference is not N
             final ReferenceSequence ref = refWalker.get(info.getSequenceIndex());
             final byte base = ref.getBases()[info.getPosition() - 1];
             if (base == 'N') continue;
@@ -186,16 +181,31 @@ public class CollectWgsMetrics extends CommandLineProgram {
             final HashSet<String> readNames = new HashSet<String>(info.getRecordAndPositions().size());
             int pileupSize = 0;
 
-//            int count =-1;
 
             for (final SamLocusIterator.RecordAndOffset recs : info.getRecordAndPositions()) {
-//                count++;
-//                if (recs.getRecord().getReadName().equals("H05DUALXX:3:2108:163847:0"))
-//                {
-//                    if (info.getPosition()<=3)
-//                    System.out.println(count);
-//                    System.out.println(recs.getOffset());
-//                }
+
+                if (recs.getBegin() == info.getPosition()) {
+                    for (int i = recs.getOffset(); i < recs.getRecord().getBaseQualities().length ;i++){
+                        byte quality = recs.getRecord().getBaseQualities()[i];
+                        if(quality<MINIMUM_BASE_QUALITY){
+                            countBaseQp[i+info.getPosition()]++;
+                        } else {
+
+                            if(!readNames.add(recs.getRecord().getReadName()));
+
+
+
+
+                        }
+
+                    }
+
+                }
+                else{
+                    MapDuplacate.get(recs.getRecord().getReadName()).;
+
+
+                }
 
                 final byte qualitie = recs.getRecord().getBaseQualities()[recs.getOffset()];
 
@@ -205,9 +215,6 @@ public class CollectWgsMetrics extends CommandLineProgram {
                     continue;
                 }
                 if (!readNames.add(recs.getRecord().getReadName())) {
-//                    if(info.getPosition()==3){
-////                        System.out.println(count);
-//                    }
                     ++basesExcludedByOverlap;
                     continue;
                 }
@@ -228,7 +235,7 @@ public class CollectWgsMetrics extends CommandLineProgram {
 
             if (usingStopAfter && ++counter > stopAfter) break;
         }
-       
+
 
         // Construct and write the outputs
         final Histogram<Integer> histo = new Histogram<Integer>("coverage", "count");
