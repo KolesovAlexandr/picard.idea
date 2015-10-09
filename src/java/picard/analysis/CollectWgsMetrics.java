@@ -25,6 +25,7 @@ import picard.util.MathUtil;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 
@@ -172,60 +173,64 @@ public class CollectWgsMetrics extends CommandLineProgram {
         long basesExcludedByCapping = 0;
 
 
-
         class CWgsQualities {
             LoopArray countBasesExcludedByBaseq;
             LoopArray countBasesExcludedByOverlap;
             LoopArray readNameSize;
 
-           public CWgsQualities(int length){
-               countBasesExcludedByBaseq = new LoopArray(length);
-               countBasesExcludedByOverlap = new LoopArray(length);
-               readNameSize = new LoopArray(length);
-           }
-            public void calculateRead(SamLocusIterator.RecordAndOffset recs, HashSet<String> readNames, final int position){
-                final String readName = recs.getRecord().getReadName();
+            public CWgsQualities(int length) {
+                countBasesExcludedByBaseq = new LoopArray(length);
+                countBasesExcludedByOverlap = new LoopArray(length);
+                readNameSize = new LoopArray(length);
+                HashMap<Integer, HashSet<String>> rr;
 
+            }
+
+            public void calculateRead(SamLocusIterator.RecordAndOffset recs, HashSet<String> readNames, final int position) {
+                boolean basesExcludedByOverlapIsFirst = false;
+                final String readName = recs.getRecord().getReadName();
+                boolean basesIsExcludedByOverlap = readNames.add(readName);
                 if (!recs.isRecordProcessed()) {
-                    boolean basesIsExcludedByOverlap = false;
-                    basesIsExcludedByOverlap = readNames.add(readName);
+                    int oldCountBasesExcludedByOverlap = countBasesExcludedByOverlap.get(position%countBasesExcludedByOverlap.lengt());
+                    int oldReadNameSize = readNameSize.get(position%readNameSize.lengt());
                     final int length = recs.getRecord().getBaseQualities().length;
-                    boolean pileupsSizeIncrmentIsFirst = true;
-                    boolean basesExcludedByOverlapIsFirst = false;
                     for (int i = recs.getOffset(); i < length; i++) {
                         final byte quality = recs.getRecord().getBaseQualities()[i];
-                        int indexBaseQ = countBasesExcludedByBaseq.getIndex(i-recs.getOffset()+position);
-                        int indexOverlap = countBasesExcludedByOverlap.getIndex(i-recs.getOffset()+position);
-                        int indexReadNamesSize = readNameSize.getIndex(i-recs.getOffset()+position);
+
+                        int indexBaseQ = countBasesExcludedByBaseq.getIndex(i - recs.getOffset() + position);
+                        int indexOverlap = countBasesExcludedByOverlap.getIndex(i - recs.getOffset() + position);
+                        int indexReadNamesSize = readNameSize.getIndex(i - recs.getOffset() + position);
+
                         if (quality < MINIMUM_BASE_QUALITY) {
                             countBasesExcludedByBaseq.incriment(indexBaseQ);
                         } else {
                             basesExcludedByOverlapIsFirst = true;
+
+
                             if (!basesIsExcludedByOverlap) {
                                 countBasesExcludedByOverlap.incriment(indexOverlap);
-                                if (pileupsSizeIncrmentIsFirst){
-                                    pileupsSizeIncrmentIsFirst = false;
-                                }
                             } else {
                                 readNameSize.incriment(indexReadNamesSize);
                             }
                         }
                     }
-                    if (!basesExcludedByOverlapIsFirst) readNames.remove(readName);
-
                     recs.processRecord();
+                    if ((readNameSize.get(position%readNameSize.lengt())-oldReadNameSize) + (countBasesExcludedByOverlap.get(position%countBasesExcludedByOverlap.lengt())-oldCountBasesExcludedByOverlap) == 0)
+                        readNames.remove(readName);
                 }
 
+
             }
-            public int getIndex(int i){
+
+            public int getIndex(int i) {
                 return countBasesExcludedByBaseq.getIndex(i);
             }
 
-            public  int getCountBasesExcludedByBaseq(int i){
+            public int getCountBasesExcludedByBaseq(int i) {
                 return countBasesExcludedByBaseq.get(i);
             }
 
-            public  int getCountBasesExcludedByOverlap(int i){
+            public int getCountBasesExcludedByOverlap(int i) {
                 return countBasesExcludedByOverlap.get(i);
             }
 
@@ -241,7 +246,6 @@ public class CollectWgsMetrics extends CommandLineProgram {
         while (iterator.hasNext()) {
 
             final SamLocusIterator.LocusInfo info = iterator.next();
-            if (info.getPosition()==4) return 0;
 
             // Check that the reference is not N
             final ReferenceSequence ref = refWalker.get(info.getSequenceIndex());
@@ -262,15 +266,21 @@ public class CollectWgsMetrics extends CommandLineProgram {
 //                basesExcludedByCapping += cWgsQualities.getCountBasesExcludedByBaseq(info.getPosition());
 ////                continue;
 //            }
-            int index = cWgsQualities.getIndex(info.getPosition());
-            basesExcludedByBaseq += cWgsQualities.getCountBasesExcludedByBaseq(index);
-            basesExcludedByOverlap += cWgsQualities.getCountBasesExcludedByOverlap(index);
+            int indexByBaseq = cWgsQualities.getIndex(info.getPosition());
+            int indexByOverlap = cWgsQualities.getIndex(info.getPosition());
+            int indexReadNameSize = cWgsQualities.getIndex(info.getPosition());
+            basesExcludedByBaseq += cWgsQualities.getCountBasesExcludedByBaseq(indexByBaseq);
+            basesExcludedByOverlap += cWgsQualities.getCountBasesExcludedByOverlap(indexByOverlap);
 //            cWgsQualities.calculateQualities();
 
 
-            final int readNamesSize = cWgsQualities.getReadNamesSize(index);
+            final int readNamesSize = cWgsQualities.getReadNamesSize(indexReadNameSize);
             final int depth = Math.min(readNamesSize, max);
+//            if (readNamesSize < max) {
+//                System.out.println();
+//            }
             if (depth < readNamesSize) basesExcludedByCapping += readNamesSize - max;
+
             HistogramArray[depth]++;
 
             // Record progress and perhaps stop
