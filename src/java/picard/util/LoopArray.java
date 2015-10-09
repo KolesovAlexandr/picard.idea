@@ -17,8 +17,9 @@ public class LoopArray {
     public int getIndex(int i){
         int index = i%_length;
         int pass = i/_length;
-        if (_array[index] != pass){
+        if (_pass[index] != pass){
             _array[index]=0;
+            _pass[index] = pass;
         }
 
         return index;
